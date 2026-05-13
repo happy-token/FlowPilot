@@ -8,6 +8,11 @@
   const PLUS_PAYMENT_STEP_KEY = 'paypal-approve';
   const SIGNUP_METHOD_EMAIL = 'email';
   const SIGNUP_METHOD_PHONE = 'phone';
+  const STEP_KIND_REAL = 'real';
+  const STEP_KIND_VIRTUAL = 'virtual';
+  const DISPLAY_PHONE_VERIFICATION_STEP_KEY = 'phone-verification';
+  const DISPLAY_PHONE_VERIFICATION_TITLE = '\u624b\u673a\u53f7\u9a8c\u8bc1';
+  const DISPLAY_PHONE_VERIFICATION_BEFORE_STEP_KEY = 'confirm-oauth';
 
   const NORMAL_STEP_DEFINITIONS = [
     { id: 1, order: 10, key: 'open-chatgpt', title: '打开 ChatGPT 官网' },
@@ -135,6 +140,22 @@
     return step.title;
   }
 
+  function shouldShowOpenAiPhoneVerificationStep(options = {}) {
+    return normalizeActiveFlowId(options?.activeFlowId, DEFAULT_ACTIVE_FLOW_ID) === DEFAULT_ACTIVE_FLOW_ID
+      && Boolean(options?.phoneVerificationEnabled)
+      && getResolvedSignupMethod(options) === SIGNUP_METHOD_EMAIL;
+  }
+
+  const OPENAI_RESOLVED_STEP_RULES = Object.freeze([
+    Object.freeze({
+      key: DISPLAY_PHONE_VERIFICATION_STEP_KEY,
+      title: DISPLAY_PHONE_VERIFICATION_TITLE,
+      insertBeforeStepKey: DISPLAY_PHONE_VERIFICATION_BEFORE_STEP_KEY,
+      skippable: true,
+      visibleWhen: shouldShowOpenAiPhoneVerificationStep,
+    }),
+  ]);
+
   const FLOW_DEFINITION_BUILDERS = Object.freeze({
     openai: {
       getAllSteps() {
@@ -157,6 +178,8 @@
       getModeStepDefinitions: getOpenAiModeStepDefinitions,
       getPlusPaymentStepTitle: getOpenAiPlusPaymentStepTitle,
       resolveStepTitle: getOpenAiResolvedStepTitle,
+      resolvedStepRules: OPENAI_RESOLVED_STEP_RULES,
+      shouldShowPhoneVerificationStep: shouldShowOpenAiPhoneVerificationStep,
     },
   });
 
@@ -186,6 +209,135 @@
     }));
   }
 
+  function sortSteps(steps = []) {
+    return steps.slice().sort((left, right) => {
+      const leftOrder = Number.isFinite(left?.order) ? left.order : left?.id;
+      const rightOrder = Number.isFinite(right?.order) ? right.order : right?.id;
+      if (leftOrder !== rightOrder) return leftOrder - rightOrder;
+      return Number(left?.id || 0) - Number(right?.id || 0);
+    });
+  }
+
+  function getPreviousExecutableStepId(previousStep = null) {
+    const executableStepId = Number(previousStep?.executableStepId);
+    if (Number.isFinite(executableStepId) && executableStepId > 0) {
+      return executableStepId;
+    }
+    const inheritedExecutableStepId = Number(previousStep?.previousExecutableStepId);
+    if (Number.isFinite(inheritedExecutableStepId) && inheritedExecutableStepId > 0) {
+      return inheritedExecutableStepId;
+    }
+    return 0;
+  }
+
+  function createResolvedRealStep(step = {}, options = {}) {
+    const stepId = Number(step?.id);
+    const previousStep = options?.previousStep || null;
+    const displayStepId = options?.displayStepId ?? step?.id;
+    const displayOrder = Number.isFinite(options?.displayOrder)
+      ? options.displayOrder
+      : (Number.isFinite(step?.order) ? step.order : stepId);
+    return {
+      ...step,
+      flowId: options?.flowId || step?.flowId || DEFAULT_ACTIVE_FLOW_ID,
+      kind: STEP_KIND_REAL,
+      type: STEP_KIND_REAL,
+      visible: true,
+      executable: true,
+      displayOnly: false,
+      displayOrder,
+      displayStepId,
+      stepId: Number.isFinite(stepId) ? stepId : null,
+      executableStepId: Number.isFinite(stepId) ? stepId : '',
+      statusSource: 'step',
+      statusKey: String(step?.key || ''),
+      previousStepKey: previousStep ? String(previousStep?.key || '') : '',
+      previousExecutableStepId: getPreviousExecutableStepId(previousStep),
+      skippable: Number.isFinite(stepId) && stepId > 0,
+    };
+  }
+
+  function createResolvedVirtualStep(rule = {}, options = {}) {
+    const previousStep = options?.previousStep || null;
+    const baseStepId = Number(options?.baseStepId);
+    const displayStepId = options?.displayStepId ?? '';
+    const displayOrder = Number.isFinite(options?.displayOrder)
+      ? options.displayOrder
+      : displayStepId;
+    return {
+      flowId: options?.flowId || DEFAULT_ACTIVE_FLOW_ID,
+      id: `${Number.isFinite(baseStepId) ? baseStepId : 'virtual'}:${String(rule?.key || 'virtual')}`,
+      key: String(rule?.key || ''),
+      title: String(rule?.title || ''),
+      kind: STEP_KIND_VIRTUAL,
+      type: STEP_KIND_VIRTUAL,
+      visible: true,
+      executable: false,
+      displayOnly: true,
+      displayOrder,
+      displayStepId,
+      stepId: null,
+      executableStepId: '',
+      statusSource: 'display-step',
+      statusKey: String(rule?.key || ''),
+      insertBeforeStepKey: String(rule?.insertBeforeStepKey || ''),
+      previousStepKey: previousStep ? String(previousStep?.key || '') : '',
+      previousExecutableStepId: getPreviousExecutableStepId(previousStep),
+      skippable: rule?.skippable !== false,
+    };
+  }
+
+  function resolveSteps(steps = [], options = {}) {
+    const { flowId, builder } = getFlowDefinitionBuilder(options);
+    const baseSteps = cloneSteps(sortSteps(Array.isArray(steps) ? steps : []), options, flowId);
+    const resolvedRules = Array.isArray(builder?.resolvedStepRules)
+      ? builder.resolvedStepRules.filter((rule) => (
+        rule
+        && String(rule?.key || '').trim()
+        && String(rule?.insertBeforeStepKey || '').trim()
+        && (typeof rule.visibleWhen !== 'function' || rule.visibleWhen(options))
+      ))
+      : [];
+
+    const resolvedSteps = [];
+    const insertedRuleKeys = new Set();
+    let displayOffset = 0;
+
+    baseSteps.forEach((step) => {
+      const stepId = Number(step?.id);
+      const stepKey = String(step?.key || '');
+      const matchingRules = resolvedRules.filter((rule) => (
+        !insertedRuleKeys.has(rule.key)
+        && String(rule.insertBeforeStepKey || '') === stepKey
+      ));
+
+      matchingRules.forEach((rule) => {
+        const previousStep = resolvedSteps[resolvedSteps.length - 1] || null;
+        const displayStepId = Number.isFinite(stepId) ? stepId + displayOffset : (resolvedSteps.length + 1);
+        resolvedSteps.push(createResolvedVirtualStep(rule, {
+          flowId,
+          previousStep,
+          baseStepId: stepId,
+          displayStepId,
+          displayOrder: resolvedSteps.length + 1,
+        }));
+        insertedRuleKeys.add(rule.key);
+        displayOffset += 1;
+      });
+
+      const previousStep = resolvedSteps[resolvedSteps.length - 1] || null;
+      const displayStepId = Number.isFinite(stepId) ? stepId + displayOffset : (resolvedSteps.length + 1);
+      resolvedSteps.push(createResolvedRealStep(step, {
+        flowId,
+        previousStep,
+        displayStepId,
+        displayOrder: resolvedSteps.length + 1,
+      }));
+    });
+
+    return resolvedSteps;
+  }
+
   function getSteps(options = {}) {
     const { flowId, builder } = getFlowDefinitionBuilder(options);
     if (!builder?.getModeStepDefinitions) {
@@ -200,6 +352,18 @@
       return [];
     }
     return cloneSteps(builder.getAllSteps(options), options, flowId);
+  }
+
+  function getResolvedSteps(options = {}) {
+    return resolveSteps(getSteps(options), options);
+  }
+
+  function shouldShowPhoneVerificationStep(options = {}) {
+    const { builder } = getFlowDefinitionBuilder(options);
+    if (typeof builder?.shouldShowPhoneVerificationStep === 'function') {
+      return Boolean(builder.shouldShowPhoneVerificationStep(options));
+    }
+    return false;
   }
 
   function getPlusPaymentStepTitle(options = {}) {
@@ -245,6 +409,7 @@
     getAllSteps,
     getLastStepId,
     getPlusPaymentStepTitle,
+    getResolvedSteps,
     getRegisteredFlowIds,
     getStepById,
     getStepIds,
@@ -254,5 +419,7 @@
     normalizeActiveFlowId,
     normalizePlusPaymentMethod,
     normalizeSignupMethod,
+    resolveSteps,
+    shouldShowPhoneVerificationStep,
   };
 });

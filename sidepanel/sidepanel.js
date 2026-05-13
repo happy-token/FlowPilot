@@ -520,7 +520,6 @@ const DEFAULT_SIGNUP_METHOD = SIGNUP_METHOD_EMAIL;
 const DEFAULT_ACTIVE_FLOW_ID = 'openai';
 const DISPLAY_PHONE_VERIFICATION_STEP_KEY = 'phone-verification';
 const DISPLAY_PHONE_VERIFICATION_TITLE = '\u624b\u673a\u53f7\u9a8c\u8bc1';
-const DISPLAY_PHONE_VERIFICATION_BEFORE_STEP_KEY = 'confirm-oauth';
 let latestState = null;
 let currentPlusModeEnabled = false;
 let currentPlusPaymentMethod = DEFAULT_PLUS_PAYMENT_METHOD;
@@ -830,65 +829,48 @@ function getStepDefinitionsForMode(plusModeEnabled = false, options = {}) {
     });
 }
 
-function shouldShowDisplayPhoneVerificationStep(options = {}) {
-  const defaultFlowId = typeof DEFAULT_ACTIVE_FLOW_ID !== 'undefined' ? DEFAULT_ACTIVE_FLOW_ID : 'openai';
-  const activeFlowId = String(
-    options.activeFlowId
-    || (typeof latestState !== 'undefined' ? latestState?.activeFlowId : '')
-    || defaultFlowId
-  ).trim().toLowerCase() || defaultFlowId;
-  const phoneVerificationEnabled = Object.prototype.hasOwnProperty.call(options || {}, 'phoneVerificationEnabled')
-    ? Boolean(options.phoneVerificationEnabled)
-    : Boolean(currentPhoneVerificationEnabled);
-  const signupMethod = normalizeSignupMethod(options.signupMethod || currentSignupMethod || DEFAULT_SIGNUP_METHOD);
-  return activeFlowId === defaultFlowId
-    && phoneVerificationEnabled
-    && signupMethod === SIGNUP_METHOD_EMAIL;
-}
-
 function getDisplayStepDefinitions(steps = stepDefinitions, options = {}) {
   const baseSteps = Array.isArray(steps) ? steps : [];
-  const shouldShowPhoneStep = shouldShowDisplayPhoneVerificationStep({
-    activeFlowId: options.activeFlowId,
+  const defaultFlowId = typeof DEFAULT_ACTIVE_FLOW_ID !== 'undefined' ? DEFAULT_ACTIVE_FLOW_ID : 'openai';
+  const defaultPlusPaymentMethod = typeof DEFAULT_PLUS_PAYMENT_METHOD !== 'undefined'
+    ? DEFAULT_PLUS_PAYMENT_METHOD
+    : 'paypal';
+  const currentPaymentMethod = typeof currentPlusPaymentMethod !== 'undefined'
+    ? currentPlusPaymentMethod
+    : defaultPlusPaymentMethod;
+  const normalizePaymentMethod = typeof normalizePlusPaymentMethod === 'function'
+    ? normalizePlusPaymentMethod
+    : ((value) => String(value || '').trim().toLowerCase() || defaultPlusPaymentMethod);
+  const rootScope = typeof window !== 'undefined' ? window : globalThis;
+  const resolvedOptions = {
+    activeFlowId: String(
+      options.activeFlowId
+      || (typeof latestState !== 'undefined' ? latestState?.activeFlowId : '')
+      || defaultFlowId
+    ).trim().toLowerCase() || defaultFlowId,
+    plusModeEnabled: typeof currentPlusModeEnabled !== 'undefined'
+      ? Boolean(currentPlusModeEnabled)
+      : Boolean(options.plusModeEnabled),
+    plusPaymentMethod: normalizePaymentMethod(options.plusPaymentMethod || currentPaymentMethod || defaultPlusPaymentMethod),
     phoneVerificationEnabled: Object.prototype.hasOwnProperty.call(options || {}, 'phoneVerificationEnabled')
-      ? options.phoneVerificationEnabled
-      : currentPhoneVerificationEnabled,
-    signupMethod: options.signupMethod || currentSignupMethod,
-  });
-  const displaySteps = [];
-  let insertedPhoneStep = false;
-  let displayOffset = 0;
+      ? Boolean(options.phoneVerificationEnabled)
+      : Boolean(currentPhoneVerificationEnabled),
+    signupMethod: normalizeSignupMethod(options.signupMethod || currentSignupMethod || DEFAULT_SIGNUP_METHOD),
+  };
 
-  baseSteps.forEach((step) => {
+  if (typeof rootScope.MultiPageStepDefinitions?.resolveSteps === 'function') {
+    return rootScope.MultiPageStepDefinitions.resolveSteps(baseSteps, resolvedOptions);
+  }
+
+  return baseSteps.map((step) => {
     const stepId = Number(step?.id);
-    const isInsertPoint = shouldShowPhoneStep
-      && !insertedPhoneStep
-      && String(step?.key || '') === DISPLAY_PHONE_VERIFICATION_BEFORE_STEP_KEY;
-
-    if (isInsertPoint) {
-      const previousExecutableStep = displaySteps.slice().reverse().find((entry) => !entry.displayOnly);
-      displaySteps.push({
-        displayOnly: true,
-        displayStepId: Number.isFinite(stepId) ? stepId : '',
-        executableStepId: '',
-        id: `${stepId || 'virtual'}:${DISPLAY_PHONE_VERIFICATION_STEP_KEY}`,
-        key: DISPLAY_PHONE_VERIFICATION_STEP_KEY,
-        previousExecutableStepId: Number(previousExecutableStep?.executableStepId) || 0,
-        title: DISPLAY_PHONE_VERIFICATION_TITLE,
-      });
-      insertedPhoneStep = true;
-      displayOffset = 1;
-    }
-
-    displaySteps.push({
+    return {
       ...step,
       displayOnly: false,
-      displayStepId: Number.isFinite(stepId) ? stepId + displayOffset : step?.id,
-      executableStepId: stepId,
-    });
+      displayStepId: Number.isFinite(stepId) ? stepId : step?.id,
+      executableStepId: Number.isFinite(stepId) ? stepId : '',
+    };
   });
-
-  return displaySteps;
 }
 
 function getStepIdByKeyForCurrentMode(stepKey = '') {

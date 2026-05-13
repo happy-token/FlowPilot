@@ -13,6 +13,14 @@ test('step definitions module exposes ordered normal and Plus step metadata', ()
   const plusPhoneSteps = api.getSteps({ plusModeEnabled: true, signupMethod: 'phone' });
   const goPaySteps = api.getSteps({ plusModeEnabled: true, plusPaymentMethod: 'gopay' });
   const gpcSteps = api.getSteps({ plusModeEnabled: true, plusPaymentMethod: 'gpc-helper' });
+  const resolvedEmailSteps = api.getResolvedSteps({
+    phoneVerificationEnabled: true,
+    signupMethod: 'email',
+  });
+  const resolvedPhoneSteps = api.getResolvedSteps({
+    phoneVerificationEnabled: true,
+    signupMethod: 'phone',
+  });
 
   assert.equal(Array.isArray(steps), true);
   assert.equal(steps.length, 10);
@@ -40,6 +48,35 @@ test('step definitions module exposes ordered normal and Plus step metadata', ()
   assert.equal(steps[5].title, '等待注册成功');
   assert.equal(phoneSteps[1].title, '注册并输入手机号');
   assert.equal(phoneSteps[3].title, '获取手机验证码');
+
+  assert.equal(api.shouldShowPhoneVerificationStep({
+    phoneVerificationEnabled: true,
+    signupMethod: 'email',
+  }), true);
+  assert.equal(api.shouldShowPhoneVerificationStep({
+    phoneVerificationEnabled: true,
+    signupMethod: 'phone',
+  }), false);
+  assert.deepStrictEqual(
+    resolvedEmailSteps.slice(-5).map((step) => step.key),
+    [
+      'oauth-login',
+      'fetch-login-code',
+      'phone-verification',
+      'confirm-oauth',
+      'platform-verify',
+    ]
+  );
+  assert.deepStrictEqual(
+    resolvedEmailSteps.slice(-5).map((step) => step.displayStepId),
+    [7, 8, 9, 10, 11]
+  );
+  assert.equal(resolvedEmailSteps.find((step) => step.key === 'phone-verification')?.displayOnly, true);
+  assert.equal(resolvedEmailSteps.find((step) => step.key === 'phone-verification')?.statusSource, 'display-step');
+  assert.deepStrictEqual(
+    resolvedPhoneSteps.map((step) => step.key),
+    steps.map((step) => step.key)
+  );
 
   assert.deepStrictEqual(
     plusSteps.map((step) => step.key),

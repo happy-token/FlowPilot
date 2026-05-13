@@ -3,6 +3,11 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 
 const sidepanelSource = fs.readFileSync('sidepanel/sidepanel.js', 'utf8');
+const sharedStepDefinitionsSource = fs.readFileSync('data/step-definitions.js', 'utf8');
+const sharedStepDefinitions = new Function(
+  'self',
+  `${sharedStepDefinitionsSource}; return self.MultiPageStepDefinitions;`
+)({});
 
 function extractFunction(name) {
   const asyncStart = sidepanelSource.indexOf(`async function ${name}(`);
@@ -102,7 +107,7 @@ test('sidepanel step definitions keep the selected Plus payment method', () => {
     extractFunction('syncStepDefinitionsForMode'),
   ].join('\n');
 
-  const api = new Function(`
+  const api = new Function('sharedStepDefinitions', `
 const calls = [];
 const window = {
   MultiPageStepDefinitions: {
@@ -148,11 +153,10 @@ return {
 test('sidepanel display-only phone verification step is email signup only', () => {
   const bundle = [
     extractFunction('normalizeSignupMethod'),
-    extractFunction('shouldShowDisplayPhoneVerificationStep'),
     extractFunction('getDisplayStepDefinitions'),
   ].join('\n');
 
-  const api = new Function(`
+  const api = new Function('sharedStepDefinitions', `
 const DISPLAY_PHONE_VERIFICATION_STEP_KEY = 'phone-verification';
 const DISPLAY_PHONE_VERIFICATION_TITLE = '\\u624b\\u673a\\u53f7\\u9a8c\\u8bc1';
 const DISPLAY_PHONE_VERIFICATION_BEFORE_STEP_KEY = 'confirm-oauth';
@@ -160,6 +164,16 @@ const SIGNUP_METHOD_EMAIL = 'email';
 const SIGNUP_METHOD_PHONE = 'phone';
 const DEFAULT_SIGNUP_METHOD = SIGNUP_METHOD_EMAIL;
 const DEFAULT_ACTIVE_FLOW_ID = 'openai';
+const window = {
+  MultiPageStepDefinitions: {
+    resolveSteps(steps, options) {
+      return sharedStepDefinitions.resolveSteps(steps, options);
+    },
+    shouldShowPhoneVerificationStep(options) {
+      return sharedStepDefinitions.shouldShowPhoneVerificationStep(options);
+    },
+  },
+};
 let latestState = {};
 let currentPhoneVerificationEnabled = false;
 let currentSignupMethod = 'email';
@@ -167,9 +181,8 @@ let stepDefinitions = [];
 ${bundle}
 return {
   getDisplayStepDefinitions,
-  shouldShowDisplayPhoneVerificationStep,
 };
-`)();
+`)(sharedStepDefinitions);
 
   const baseSteps = [
     { id: 7, order: 70, key: 'oauth-login', title: 'OAuth' },
@@ -197,15 +210,15 @@ return {
   assert.equal(emailDisplaySteps[2].displayOnly, true);
   assert.equal(emailDisplaySteps[2].executableStepId, '');
 
-  assert.equal(api.shouldShowDisplayPhoneVerificationStep({
+  assert.equal(sharedStepDefinitions.shouldShowPhoneVerificationStep({
     phoneVerificationEnabled: true,
     signupMethod: 'email',
   }), true);
-  assert.equal(api.shouldShowDisplayPhoneVerificationStep({
+  assert.equal(sharedStepDefinitions.shouldShowPhoneVerificationStep({
     phoneVerificationEnabled: false,
     signupMethod: 'email',
   }), false);
-  assert.equal(api.shouldShowDisplayPhoneVerificationStep({
+  assert.equal(sharedStepDefinitions.shouldShowPhoneVerificationStep({
     phoneVerificationEnabled: true,
     signupMethod: 'phone',
   }), false);
@@ -236,13 +249,12 @@ test('sidepanel phone verification display changes without changing executable s
     extractFunction('normalizeSignupMethod'),
     extractFunction('normalizePlusPaymentMethod'),
     extractFunction('getStepDefinitionsForMode'),
-    extractFunction('shouldShowDisplayPhoneVerificationStep'),
     extractFunction('getDisplayStepDefinitions'),
     extractFunction('rebuildStepDefinitionState'),
     extractFunction('syncStepDefinitionsForMode'),
   ].join('\n');
 
-  const api = new Function(`
+  const api = new Function('sharedStepDefinitions', `
 const calls = [];
 const DISPLAY_PHONE_VERIFICATION_STEP_KEY = 'phone-verification';
 const DISPLAY_PHONE_VERIFICATION_TITLE = '\\u624b\\u673a\\u53f7\\u9a8c\\u8bc1';
@@ -263,6 +275,12 @@ const window = {
     },
     getPlusPaymentStepTitle() {
       return '';
+    },
+    resolveSteps(steps, options) {
+      return sharedStepDefinitions.resolveSteps(steps, options);
+    },
+    shouldShowPhoneVerificationStep(options) {
+      return sharedStepDefinitions.shouldShowPhoneVerificationStep(options);
     },
   },
 };
@@ -289,7 +307,7 @@ return {
   calls,
   syncStepDefinitionsForMode,
 };
-`)();
+`)(sharedStepDefinitions);
 
   api.syncStepDefinitionsForMode(false, {
     phoneVerificationEnabled: false,
@@ -319,7 +337,6 @@ test('sidepanel display-only phone verification unlock order follows display sta
   const bundle = [
     extractFunction('normalizeSignupMethod'),
     extractFunction('isDoneStatus'),
-    extractFunction('shouldShowDisplayPhoneVerificationStep'),
     extractFunction('getDisplayStepDefinitions'),
     extractFunction('getStepStatuses'),
     extractFunction('getDisplayStepStatuses'),
@@ -330,13 +347,23 @@ test('sidepanel display-only phone verification unlock order follows display sta
     extractFunction('canSkipDisplayStepEntry'),
   ].join('\n');
 
-  const api = new Function(`
+  const api = new Function('sharedStepDefinitions', `
 const DISPLAY_PHONE_VERIFICATION_STEP_KEY = 'phone-verification';
 const DISPLAY_PHONE_VERIFICATION_TITLE = '\\u624b\\u673a\\u53f7\\u9a8c\\u8bc1';
 const DISPLAY_PHONE_VERIFICATION_BEFORE_STEP_KEY = 'confirm-oauth';
 const SIGNUP_METHOD_EMAIL = 'email';
 const DEFAULT_SIGNUP_METHOD = SIGNUP_METHOD_EMAIL;
 const DEFAULT_ACTIVE_FLOW_ID = 'openai';
+const window = {
+  MultiPageStepDefinitions: {
+    resolveSteps(steps, options) {
+      return sharedStepDefinitions.resolveSteps(steps, options);
+    },
+    shouldShowPhoneVerificationStep(options) {
+      return sharedStepDefinitions.shouldShowPhoneVerificationStep(options);
+    },
+  },
+};
 const STATUS_ICONS = {
   pending: '',
   running: '',
@@ -362,7 +389,7 @@ return {
   canRunDisplayStepEntry,
   canSkipDisplayStepEntry,
 };
-`)();
+`)(sharedStepDefinitions);
 
   const baseSteps = [
     { id: 7, order: 70, key: 'oauth-login', title: 'OAuth' },
