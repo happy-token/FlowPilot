@@ -121,6 +121,7 @@ function updateFallbackThreadIntervalInputState() {}
 function syncScheduledCountdownTicker() {}
 function updateStopButtonState() {}
 function getStepStatuses() { return {}; }
+function hasAnyRunningStep() { return false; }
 function updateConfigMenuControls() {}
 function renderContributionMode() {}
 
@@ -210,6 +211,7 @@ function updateFallbackThreadIntervalInputState() {}
 function syncScheduledCountdownTicker() {}
 function updateStopButtonState() {}
 function getStepStatuses() { return {}; }
+function hasAnyRunningStep() { return false; }
 function updateConfigMenuControls() {}
 function renderContributionMode() {}
 

@@ -47,6 +47,7 @@
       getPendingAutoRunTimerPlan,
       getSourceLabel,
       getState,
+      getStep8PageState = async () => null,
       getStepDefinitionForState,
       getStepIdsForState,
       getLastStepIdForState,
@@ -139,6 +140,7 @@
       AUTO_RUN_TIMER_KIND_SCHEDULED_START,
       notifyStepComplete,
       notifyStepError,
+      phoneVerificationHelpers,
       patchMail2925Account,
       patchHotmailAccount,
       pollContributionStatus,
@@ -168,11 +170,17 @@
       setLuckmailPurchaseUsedState,
       setPersistentSettings,
       setState,
+      setDisplayStepStatus = async () => ({}),
       setStepStatus,
       skipAutoRunCountdown,
       skipStep,
       startContributionFlow,
       startAutoRunLoop,
+      shouldShowPhoneVerificationDisplayStepForState = (state = {}) => (
+        String(state?.activeFlowId || 'openai').trim().toLowerCase() === 'openai'
+        && Boolean(state?.phoneVerificationEnabled)
+        && resolveSignupMethod(state) === 'email'
+      ),
       deleteMail2925Account,
       deleteMail2925Accounts,
       syncHotmailAccounts,
@@ -219,6 +227,135 @@
         return String(getStepDefinitionForState(step, state)?.key || '').trim();
       }
       return '';
+    }
+
+    const DISPLAY_PHONE_VERIFICATION_STEP_KEY = 'phone-verification';
+    const DISPLAY_STEP_STATUS_VALUES = new Set([
+      'pending',
+      'running',
+      'completed',
+      'failed',
+      'stopped',
+      'manual_completed',
+      'skipped',
+    ]);
+
+    function getDisplayStepStatuses(state = {}) {
+      return state?.displayStepStatuses && typeof state.displayStepStatuses === 'object'
+        ? state.displayStepStatuses
+        : {};
+    }
+
+    function getDisplayStepStatus(state = {}, stepKey = DISPLAY_PHONE_VERIFICATION_STEP_KEY) {
+      const normalizedStepKey = String(stepKey || '').trim();
+      if (!normalizedStepKey) {
+        return 'pending';
+      }
+      const normalizedStatus = String(getDisplayStepStatuses(state)[normalizedStepKey] || '').trim().toLowerCase();
+      return DISPLAY_STEP_STATUS_VALUES.has(normalizedStatus) ? normalizedStatus : 'pending';
+    }
+
+    function isDoneStatus(status) {
+      return status === 'completed' || status === 'manual_completed' || status === 'skipped';
+    }
+
+    function getStepIdByKey(targetKey, state = {}) {
+      const activeStepIds = typeof getStepIdsForState === 'function'
+        ? getStepIdsForState(state)
+        : [];
+      return activeStepIds.find((stepId) => getStepKeyForState(stepId, state) === targetKey) || null;
+    }
+
+    async function executeDisplayPhoneVerificationStep() {
+      const currentState = await getState();
+      if (!shouldShowPhoneVerificationDisplayStepForState(currentState)) {
+        throw new Error('当前配置下无需执行手机号验证步骤。');
+      }
+      if (!phoneVerificationHelpers || typeof phoneVerificationHelpers.completePhoneVerificationFlow !== 'function') {
+        throw new Error('手机号验证能力尚未接入。');
+      }
+
+      const loginCodeStep = getStepIdByKey('fetch-login-code', currentState);
+      if (!Number.isInteger(loginCodeStep)) {
+        throw new Error('未找到登录验证码步骤，暂时无法执行手机号验证。');
+      }
+      if (!isDoneStatus(currentState?.stepStatuses?.[loginCodeStep])) {
+        throw new Error(`请先完成步骤 ${loginCodeStep}，再执行手机号验证。`);
+      }
+
+      const currentDisplayStatus = getDisplayStepStatus(currentState, DISPLAY_PHONE_VERIFICATION_STEP_KEY);
+      if (currentDisplayStatus === 'running') {
+        throw new Error('手机号验证步骤正在执行中。');
+      }
+
+      await invalidateDownstreamAfterStepRestart(loginCodeStep, {
+        logLabel: '手机号验证重新执行',
+      });
+
+      const stateAfterReset = await getState();
+      const signupTabId = typeof getTabId === 'function' ? await getTabId('signup-page') : null;
+      if (!Number.isInteger(signupTabId)) {
+        throw new Error('缺少认证页面标签页，请先重新执行登录验证码步骤。');
+      }
+
+      const pageState = await getStep8PageState(signupTabId, 1500, loginCodeStep + 1);
+      if (!pageState) {
+        throw new Error('认证页面暂未就绪，请稍后重试。');
+      }
+
+      if (pageState?.consentReady || pageState?.consentPage) {
+        await setDisplayStepStatus(DISPLAY_PHONE_VERIFICATION_STEP_KEY, 'skipped', stateAfterReset);
+        return { ok: true, displayStepKey: DISPLAY_PHONE_VERIFICATION_STEP_KEY, status: 'skipped' };
+      }
+
+      if (!pageState?.addPhonePage && !pageState?.phoneVerificationPage) {
+        throw new Error('当前认证页尚未进入手机号验证阶段，请先确认上一步已完成。');
+      }
+
+      await setDisplayStepStatus(DISPLAY_PHONE_VERIFICATION_STEP_KEY, 'running', stateAfterReset);
+      try {
+        await phoneVerificationHelpers.completePhoneVerificationFlow(signupTabId, pageState, {
+          visibleStep: loginCodeStep + 1,
+        });
+      } catch (error) {
+        await setDisplayStepStatus(
+          DISPLAY_PHONE_VERIFICATION_STEP_KEY,
+          isStopError(error) ? 'stopped' : 'failed'
+        );
+        throw error;
+      }
+
+      await setDisplayStepStatus(DISPLAY_PHONE_VERIFICATION_STEP_KEY, 'completed', await getState());
+      return { ok: true, displayStepKey: DISPLAY_PHONE_VERIFICATION_STEP_KEY, status: 'completed' };
+    }
+
+    async function skipDisplayPhoneVerificationStep() {
+      const currentState = await ensureManualInteractionAllowed('跳过手机号验证');
+      if (!shouldShowPhoneVerificationDisplayStepForState(currentState)) {
+        throw new Error('当前配置下无需跳过手机号验证步骤。');
+      }
+
+      const loginCodeStep = getStepIdByKey('fetch-login-code', currentState);
+      if (!Number.isInteger(loginCodeStep)) {
+        throw new Error('未找到登录验证码步骤，暂时无法跳过手机号验证。');
+      }
+      if (!isDoneStatus(currentState?.stepStatuses?.[loginCodeStep])) {
+        throw new Error(`请先完成步骤 ${loginCodeStep}，再跳过手机号验证。`);
+      }
+
+      const currentDisplayStatus = getDisplayStepStatus(currentState, DISPLAY_PHONE_VERIFICATION_STEP_KEY);
+      if (currentDisplayStatus === 'running') {
+        throw new Error('手机号验证步骤正在执行中，无法跳过。');
+      }
+      if (isDoneStatus(currentDisplayStatus)) {
+        throw new Error('手机号验证步骤已完成，无需重复跳过。');
+      }
+
+      await invalidateDownstreamAfterStepRestart(loginCodeStep, {
+        logLabel: '手机号验证手动跳过',
+      });
+      await setDisplayStepStatus(DISPLAY_PHONE_VERIFICATION_STEP_KEY, 'skipped', await getState());
+      return { ok: true, displayStepKey: DISPLAY_PHONE_VERIFICATION_STEP_KEY, status: 'skipped' };
     }
 
     function isStaleAutoRunStepMessage(step, state = {}) {
@@ -909,6 +1046,13 @@
             await lockAutomationWindowFromMessage(message, sender);
             await ensureManualInteractionAllowed('手动执行步骤');
           }
+          const displayStepKey = String(message.payload?.displayStepKey || '').trim();
+          if (displayStepKey) {
+            if (displayStepKey !== DISPLAY_PHONE_VERIFICATION_STEP_KEY) {
+              throw new Error(`未知显示步骤：${displayStepKey}`);
+            }
+            return await executeDisplayPhoneVerificationStep();
+          }
           const step = message.payload.step;
           if (message.source === 'sidepanel') {
             await ensureManualStepPrerequisites(step);
@@ -1048,6 +1192,13 @@
         }
 
         case 'SKIP_STEP': {
+          const displayStepKey = String(message.payload?.displayStepKey || '').trim();
+          if (displayStepKey) {
+            if (displayStepKey !== DISPLAY_PHONE_VERIFICATION_STEP_KEY) {
+              throw new Error(`未知显示步骤：${displayStepKey}`);
+            }
+            return await skipDisplayPhoneVerificationStep();
+          }
           const step = Number(message.payload?.step);
           return await skipStep(step);
         }
@@ -1092,6 +1243,14 @@
           const stepModeChanged = modeChanged || (nextPlusModeEnabled && plusPaymentChanged);
           const oauthFlowTimeoutDisabled = Object.prototype.hasOwnProperty.call(updates, 'oauthFlowTimeoutEnabled')
             && updates.oauthFlowTimeoutEnabled === false;
+          const shouldResetDisplayStepStatuses = (
+            Object.prototype.hasOwnProperty.call(updates, 'phoneVerificationEnabled')
+            || Object.prototype.hasOwnProperty.call(updates, 'plusModeEnabled')
+            || Object.prototype.hasOwnProperty.call(updates, 'signupMethod')
+            || Object.prototype.hasOwnProperty.call(updates, 'panelMode')
+            || Object.prototype.hasOwnProperty.call(updates, 'activeFlowId')
+            || Object.prototype.hasOwnProperty.call(updates, 'contributionMode')
+          );
           await setPersistentSettings(updates);
           const stateUpdates = {
             ...updates,
@@ -1106,6 +1265,9 @@
             stateUpdates.preferredIcloudHost = nextHostPreference === 'icloud.com' || nextHostPreference === 'icloud.com.cn'
               ? nextHostPreference
               : '';
+          }
+          if (shouldResetDisplayStepStatuses) {
+            stateUpdates.displayStepStatuses = {};
           }
           if (stepModeChanged && typeof getStepIdsForState === 'function') {
             const nextStateForSteps = { ...currentState, ...stateUpdates };

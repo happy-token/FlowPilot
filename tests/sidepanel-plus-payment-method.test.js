@@ -5,15 +5,31 @@ const fs = require('node:fs');
 const sidepanelSource = fs.readFileSync('sidepanel/sidepanel.js', 'utf8');
 
 function extractFunction(name) {
-  const asyncStart = sidepanelSource.indexOf(`async function ${name}`);
-  const normalStart = sidepanelSource.indexOf(`function ${name}`);
+  const asyncStart = sidepanelSource.indexOf(`async function ${name}(`);
+  const normalStart = sidepanelSource.indexOf(`function ${name}(`);
   const start = asyncStart !== -1
     ? asyncStart
     : normalStart;
   if (start === -1) {
     throw new Error(`Function ${name} not found`);
   }
-  const signatureEnd = sidepanelSource.indexOf(')', start);
+  let parenDepth = 0;
+  let signatureEnd = -1;
+  for (let index = start; index < sidepanelSource.length; index += 1) {
+    const char = sidepanelSource[index];
+    if (char === '(') {
+      parenDepth += 1;
+    } else if (char === ')') {
+      parenDepth -= 1;
+      if (parenDepth === 0) {
+        signatureEnd = index;
+        break;
+      }
+    }
+  }
+  if (signatureEnd < 0) {
+    throw new Error(`Function ${name} signature not found`);
+  }
   const bodyStart = sidepanelSource.indexOf('{', signatureEnd);
   let depth = 0;
   let end = bodyStart;
@@ -33,8 +49,8 @@ function extractFunction(name) {
 }
 
 function extractLastFunction(name) {
-  const asyncStart = sidepanelSource.lastIndexOf(`async function ${name}`);
-  const normalStart = sidepanelSource.lastIndexOf(`function ${name}`);
+  const asyncStart = sidepanelSource.lastIndexOf(`async function ${name}(`);
+  const normalStart = sidepanelSource.lastIndexOf(`function ${name}(`);
   const asyncInnerFunctionStart = asyncStart >= 0 ? asyncStart + 'async '.length : -1;
   const start = asyncStart >= 0 && normalStart === asyncInnerFunctionStart
     ? asyncStart
@@ -42,7 +58,23 @@ function extractLastFunction(name) {
   if (start === -1) {
     throw new Error(`Function ${name} not found`);
   }
-  const signatureEnd = sidepanelSource.indexOf(')', start);
+  let parenDepth = 0;
+  let signatureEnd = -1;
+  for (let index = start; index < sidepanelSource.length; index += 1) {
+    const char = sidepanelSource[index];
+    if (char === '(') {
+      parenDepth += 1;
+    } else if (char === ')') {
+      parenDepth -= 1;
+      if (parenDepth === 0) {
+        signatureEnd = index;
+        break;
+      }
+    }
+  }
+  if (signatureEnd < 0) {
+    throw new Error(`Function ${name} signature not found`);
+  }
   const bodyStart = sidepanelSource.indexOf('{', signatureEnd);
   let depth = 0;
   let end = bodyStart;
@@ -281,6 +313,90 @@ return {
   assert.deepEqual(renders[1].displayKeys, ['fetch-login-code', 'phone-verification', 'confirm-oauth', 'platform-verify']);
   assert.deepEqual(renders[1].displayStepIds, [8, 9, 10, 11]);
   assert.deepEqual(renders[2].displayKeys, ['fetch-login-code', 'confirm-oauth', 'platform-verify']);
+});
+
+test('sidepanel display-only phone verification unlock order follows display status instead of previous real step', () => {
+  const bundle = [
+    extractFunction('normalizeSignupMethod'),
+    extractFunction('isDoneStatus'),
+    extractFunction('shouldShowDisplayPhoneVerificationStep'),
+    extractFunction('getDisplayStepDefinitions'),
+    extractFunction('getStepStatuses'),
+    extractFunction('getDisplayStepStatuses'),
+    extractFunction('getDisplayStepStatus'),
+    extractFunction('findDisplayStepEntryIndex'),
+    extractFunction('getPreviousDisplayStepStatus'),
+    extractFunction('canRunDisplayStepEntry'),
+    extractFunction('canSkipDisplayStepEntry'),
+  ].join('\n');
+
+  const api = new Function(`
+const DISPLAY_PHONE_VERIFICATION_STEP_KEY = 'phone-verification';
+const DISPLAY_PHONE_VERIFICATION_TITLE = '\\u624b\\u673a\\u53f7\\u9a8c\\u8bc1';
+const DISPLAY_PHONE_VERIFICATION_BEFORE_STEP_KEY = 'confirm-oauth';
+const SIGNUP_METHOD_EMAIL = 'email';
+const DEFAULT_SIGNUP_METHOD = SIGNUP_METHOD_EMAIL;
+const DEFAULT_ACTIVE_FLOW_ID = 'openai';
+const STATUS_ICONS = {
+  pending: '',
+  running: '',
+  completed: '',
+  failed: '',
+  stopped: '',
+  manual_completed: '',
+  skipped: '',
+};
+let latestState = {
+  activeFlowId: 'openai',
+  phoneVerificationEnabled: true,
+  signupMethod: 'email',
+  displayStepStatuses: {},
+};
+let currentPhoneVerificationEnabled = true;
+let currentSignupMethod = 'email';
+let stepDefinitions = [];
+${bundle}
+return {
+  getDisplayStepDefinitions,
+  getDisplayStepStatus,
+  canRunDisplayStepEntry,
+  canSkipDisplayStepEntry,
+};
+`)();
+
+  const baseSteps = [
+    { id: 7, order: 70, key: 'oauth-login', title: 'OAuth' },
+    { id: 8, order: 80, key: 'fetch-login-code', title: 'Login code' },
+    { id: 9, order: 90, key: 'confirm-oauth', title: 'Confirm OAuth' },
+    { id: 10, order: 100, key: 'platform-verify', title: 'Platform verify' },
+  ];
+  const displaySteps = api.getDisplayStepDefinitions(baseSteps, {
+    phoneVerificationEnabled: true,
+    signupMethod: 'email',
+  });
+  const phoneStep = displaySteps.find((step) => step.key === 'phone-verification');
+  const confirmStep = displaySteps.find((step) => step.key === 'confirm-oauth');
+  const statuses = { 7: 'completed', 8: 'completed', 9: 'pending', 10: 'pending' };
+
+  assert.equal(api.getDisplayStepStatus(phoneStep, statuses, {
+    displayStepStatuses: {},
+  }), 'pending');
+  assert.equal(api.canRunDisplayStepEntry(phoneStep, displaySteps, statuses, {
+    displayStepStatuses: {},
+  }), true);
+  assert.equal(api.canSkipDisplayStepEntry(phoneStep, displaySteps, statuses, {
+    displayStepStatuses: {},
+  }), true);
+  assert.equal(api.canRunDisplayStepEntry(confirmStep, displaySteps, statuses, {
+    displayStepStatuses: {},
+  }), false);
+
+  assert.equal(api.canRunDisplayStepEntry(confirmStep, displaySteps, statuses, {
+    displayStepStatuses: { 'phone-verification': 'skipped' },
+  }), true);
+  assert.equal(api.canRunDisplayStepEntry(confirmStep, displaySteps, statuses, {
+    displayStepStatuses: { 'phone-verification': 'completed' },
+  }), true);
 });
 
 test('sidepanel normalizeSignupMethod stays independent from signup constants during bootstrap', () => {

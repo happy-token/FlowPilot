@@ -904,6 +904,7 @@ const DEFAULT_STATE = {
   nodeStatuses: {},
   currentStep: 0, // 当前流程执行到的步骤编号。
   stepStatuses: { ...DEFAULT_STEP_STATUSES },
+  displayStepStatuses: {},
   runtimeState: runtimeStateHelpers?.buildDefaultRuntimeState?.() || null,
   ...CONTRIBUTION_RUNTIME_DEFAULTS,
   oauthUrl: null, // 运行时抓取到的 OAuth 地址，不要手动预填。
@@ -8191,6 +8192,71 @@ function isStepDoneStatus(status) {
   return status === 'completed' || status === 'manual_completed' || status === 'skipped';
 }
 
+const DISPLAY_PHONE_VERIFICATION_STEP_KEY = 'phone-verification';
+const DISPLAY_STEP_STATUS_VALUES = new Set([
+  'pending',
+  'running',
+  'completed',
+  'failed',
+  'stopped',
+  'manual_completed',
+  'skipped',
+]);
+
+function shouldShowPhoneVerificationDisplayStepForState(state = {}) {
+  const activeFlowId = String(state?.activeFlowId || DEFAULT_ACTIVE_FLOW_ID).trim().toLowerCase() || DEFAULT_ACTIVE_FLOW_ID;
+  return activeFlowId === DEFAULT_ACTIVE_FLOW_ID
+    && Boolean(state?.phoneVerificationEnabled)
+    && resolveSignupMethod(state) === 'email';
+}
+
+function getDisplayStepStatuses(state = {}) {
+  return state?.displayStepStatuses && typeof state.displayStepStatuses === 'object'
+    ? state.displayStepStatuses
+    : {};
+}
+
+function getDisplayStepStatus(stepKey = DISPLAY_PHONE_VERIFICATION_STEP_KEY, state = {}) {
+  const normalizedStepKey = String(stepKey || '').trim();
+  if (!normalizedStepKey) {
+    return 'pending';
+  }
+  const normalizedStatus = String(getDisplayStepStatuses(state)[normalizedStepKey] || '').trim().toLowerCase();
+  return DISPLAY_STEP_STATUS_VALUES.has(normalizedStatus) ? normalizedStatus : 'pending';
+}
+
+async function setDisplayStepStatus(stepKey, status, stateOverride = null) {
+  const normalizedStepKey = String(stepKey || '').trim();
+  if (!normalizedStepKey) {
+    return {};
+  }
+
+  const normalizedStatus = String(status || '').trim().toLowerCase();
+  const nextStatus = DISPLAY_STEP_STATUS_VALUES.has(normalizedStatus) ? normalizedStatus : 'pending';
+  const state = stateOverride && typeof stateOverride === 'object' && !Array.isArray(stateOverride)
+    ? stateOverride
+    : await getState();
+  const currentStatuses = getDisplayStepStatuses(state);
+  const currentStatus = getDisplayStepStatus(normalizedStepKey, state);
+  const hadStoredStatus = Object.prototype.hasOwnProperty.call(currentStatuses, normalizedStepKey);
+
+  if (currentStatus === nextStatus && (nextStatus !== 'pending' || !hadStoredStatus)) {
+    return currentStatuses;
+  }
+
+  const nextStatuses = { ...currentStatuses };
+  if (nextStatus === 'pending') {
+    delete nextStatuses[normalizedStepKey];
+  } else {
+    nextStatuses[normalizedStepKey] = nextStatus;
+  }
+
+  const updates = { displayStepStatuses: nextStatuses };
+  await setState(updates);
+  broadcastDataUpdate(updates);
+  return nextStatuses;
+}
+
 function getFirstUnfinishedStep(statuses = {}, stateOverride = null) {
   const state = stateOverride || {};
   const activeStepIds = typeof getStepIdsForState === 'function'
@@ -8266,6 +8332,7 @@ function getDownstreamStateResets(step, state = {}) {
   if (step <= 1) {
     return {
       ...plusRuntimeResets,
+      displayStepStatuses: {},
       oauthUrl: null,
       cpaOAuthState: null,
       cpaManagementOrigin: null,
@@ -8297,6 +8364,7 @@ function getDownstreamStateResets(step, state = {}) {
   if (step === 2) {
     return {
       ...plusRuntimeResets,
+      displayStepStatuses: {},
       password: null,
       lastEmailTimestamp: null,
       signupVerificationRequestedAt: null,
@@ -8316,6 +8384,7 @@ function getDownstreamStateResets(step, state = {}) {
   if (step === 3 || step === 4) {
     return {
       ...plusRuntimeResets,
+      displayStepStatuses: {},
       lastEmailTimestamp: null,
       signupVerificationRequestedAt: null,
       loginVerificationRequestedAt: null,
@@ -8334,6 +8403,7 @@ function getDownstreamStateResets(step, state = {}) {
   if (step === 5 || step === 6 || step === 7 || step === 8) {
     return {
       ...(step <= 6 ? plusRuntimeResets : {}),
+      displayStepStatuses: {},
       ...(step === 7 ? {
         plusBillingCountryText: '',
         plusBillingAddress: null,
@@ -8381,6 +8451,7 @@ function getDownstreamStateResets(step, state = {}) {
   }
   if (stepKey === 'oauth-login' || stepKey === 'fetch-login-code') {
     return {
+      displayStepStatuses: {},
       lastLoginCode: null,
       loginVerificationRequestedAt: null,
       oauthFlowDeadlineAt: null,
@@ -11926,6 +11997,7 @@ const messageRouter = self.MultiPageBackgroundMessageRouter?.createMessageRouter
   getPendingAutoRunTimerPlan,
   getSourceLabel,
   getState,
+  getStep8PageState,
   getStepDefinitionForState,
   getStepIdsForState,
   getLastStepIdForState,
@@ -11962,6 +12034,7 @@ const messageRouter = self.MultiPageBackgroundMessageRouter?.createMessageRouter
   AUTO_RUN_TIMER_KIND_SCHEDULED_START,
   notifyStepComplete,
   notifyStepError,
+  phoneVerificationHelpers,
   patchHotmailAccount,
   patchMail2925Account,
   registerTab,
@@ -11989,11 +12062,13 @@ const messageRouter = self.MultiPageBackgroundMessageRouter?.createMessageRouter
   setLuckmailPurchaseUsedState,
   setPersistentSettings,
   setState,
+  setDisplayStepStatus,
   setStepStatus,
   skipAutoRunCountdown,
   skipStep,
   startContributionFlow: (...args) => contributionOAuthManager?.startContributionFlow?.(...args),
   startAutoRunLoop,
+  shouldShowPhoneVerificationDisplayStepForState,
   pollContributionStatus: (...args) => contributionOAuthManager?.pollContributionStatus?.(...args),
   syncHotmailAccounts,
   syncPayPalAccounts,
@@ -13063,6 +13138,9 @@ async function getStep8PageState(tabId, responseTimeoutMs = 1500, visibleStep = 
 
 async function waitForStep8Ready(tabId, timeoutMs = STEP8_READY_WAIT_TIMEOUT_MS, options = {}) {
   const visibleStep = Math.floor(Number(options.visibleStep) || 0) || 9;
+  const displayPhoneStepKey = typeof DISPLAY_PHONE_VERIFICATION_STEP_KEY === 'string'
+    ? DISPLAY_PHONE_VERIFICATION_STEP_KEY
+    : 'phone-verification';
   const start = Date.now();
   let recovered = false;
 
@@ -13073,7 +13151,9 @@ async function waitForStep8Ready(tabId, timeoutMs = STEP8_READY_WAIT_TIMEOUT_MS,
       throw new Error(`${CLOUDFLARE_SECURITY_BLOCK_ERROR_PREFIX}${CLOUDFLARE_SECURITY_BLOCK_USER_MESSAGE}`);
     }
     if (pageState?.addPhonePage || pageState?.phoneVerificationPage) {
-      const latestState = await getState();
+      const latestState = typeof getState === 'function' ? await getState() : {};
+      const shouldTrackDisplayStep = typeof shouldShowPhoneVerificationDisplayStepForState === 'function'
+        && shouldShowPhoneVerificationDisplayStepForState(latestState);
       if (!Boolean(latestState?.phoneVerificationEnabled)) {
         const urlPart = pageState?.url ? ` URL: ${pageState.url}` : '';
         throw new Error(
@@ -13082,7 +13162,23 @@ async function waitForStep8Ready(tabId, timeoutMs = STEP8_READY_WAIT_TIMEOUT_MS,
             : `步骤 ${visibleStep}：当前认证页进入手机号页面，但未开启接码功能，无法继续自动授权。${urlPart}`.trim()
         );
       }
-      await phoneVerificationHelpers.completePhoneVerificationFlow(tabId, pageState, { visibleStep });
+      if (shouldTrackDisplayStep && typeof setDisplayStepStatus === 'function') {
+        await setDisplayStepStatus(displayPhoneStepKey, 'running', latestState);
+      }
+      try {
+        await phoneVerificationHelpers.completePhoneVerificationFlow(tabId, pageState, { visibleStep });
+      } catch (error) {
+        if (shouldTrackDisplayStep && typeof setDisplayStepStatus === 'function') {
+          await setDisplayStepStatus(
+            displayPhoneStepKey,
+            typeof isStopError === 'function' && isStopError(error) ? 'stopped' : 'failed'
+          ).catch(() => { });
+        }
+        throw error;
+      }
+      if (shouldTrackDisplayStep && typeof setDisplayStepStatus === 'function' && typeof getState === 'function') {
+        await setDisplayStepStatus(displayPhoneStepKey, 'completed', await getState());
+      }
       recovered = false;
       await sleepWithStop(250);
       continue;
@@ -13102,6 +13198,20 @@ async function waitForStep8Ready(tabId, timeoutMs = STEP8_READY_WAIT_TIMEOUT_MS,
       }
     }
     if (pageState?.consentReady) {
+      if (
+        typeof getState === 'function'
+        && typeof shouldShowPhoneVerificationDisplayStepForState === 'function'
+        && typeof getDisplayStepStatus === 'function'
+        && typeof setDisplayStepStatus === 'function'
+      ) {
+        const latestState = await getState();
+        if (
+          shouldShowPhoneVerificationDisplayStepForState(latestState)
+          && getDisplayStepStatus(displayPhoneStepKey, latestState) === 'pending'
+        ) {
+          await setDisplayStepStatus(displayPhoneStepKey, 'skipped', latestState);
+        }
+      }
       return pageState;
     }
     if (pageState === null && !recovered) {

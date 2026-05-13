@@ -199,6 +199,48 @@ test('SAVE_SETTING re-resolves signup method when panel mode changes', async () 
   assert.equal(state.signupMethod, 'email');
 });
 
+test('SAVE_SETTING clears display-only phone verification status when related mode flags change', async () => {
+  const source = fs.readFileSync('background/message-router.js', 'utf8');
+  const globalScope = { console };
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundMessageRouter;`)(globalScope);
+  const broadcasts = [];
+  let state = {
+    activeFlowId: 'openai',
+    signupMethod: 'email',
+    phoneVerificationEnabled: true,
+    plusModeEnabled: false,
+    displayStepStatuses: {
+      'phone-verification': 'completed',
+    },
+  };
+
+  const router = api.createMessageRouter({
+    addLog: async () => {},
+    buildLuckmailSessionSettingsPayload: () => ({}),
+    buildPersistentSettingsPayload: (input = {}) => Object.prototype.hasOwnProperty.call(input, 'phoneVerificationEnabled')
+      ? { phoneVerificationEnabled: Boolean(input.phoneVerificationEnabled) }
+      : {},
+    broadcastDataUpdate: (payload) => broadcasts.push(payload),
+    getState: async () => ({ ...state }),
+    setPersistentSettings: async () => {},
+    setState: async (updates) => {
+      state = { ...state, ...updates };
+    },
+  });
+
+  const response = await router.handleMessage({
+    type: 'SAVE_SETTING',
+    payload: { phoneVerificationEnabled: false },
+  });
+
+  assert.equal(response.ok, true);
+  assert.deepStrictEqual(state.displayStepStatuses, {});
+  assert.ok(
+    broadcasts.some((payload) => Object.prototype.hasOwnProperty.call(payload, 'displayStepStatuses')),
+    'expected SAVE_SETTING to broadcast cleared display step statuses'
+  );
+});
+
 test('SAVE_SETTING applies shared mode-switch normalization before persisting incompatible capability flags', async () => {
   const source = fs.readFileSync('background/message-router.js', 'utf8');
   const globalScope = { console };

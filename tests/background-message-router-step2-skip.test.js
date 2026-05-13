@@ -10,6 +10,7 @@ function createRouter(overrides = {}) {
   const events = {
     logs: [],
     stepStatuses: [],
+    displayStepStatuses: [],
     stateUpdates: [],
     broadcasts: [],
     balanceRefreshes: [],
@@ -23,8 +24,10 @@ function createRouter(overrides = {}) {
     securityBlocks: [],
     invalidations: [],
     executedSteps: [],
+    phoneVerificationRuns: [],
     accountRecords: [],
   };
+  let state = overrides.state ? { ...overrides.state } : { stepStatuses: { 3: 'pending' } };
 
   const router = api.createMessageRouter({
     addLog: async (message, level, options = {}) => {
@@ -57,7 +60,7 @@ function createRouter(overrides = {}) {
     deleteUsedIcloudAliases: async () => {},
     disableUsedLuckmailPurchases: async () => {},
     doesStepUseCompletionSignal: () => false,
-    ensureManualInteractionAllowed: async () => ({}),
+    ensureManualInteractionAllowed: overrides.ensureManualInteractionAllowed || (async () => ({ ...state })),
     executeStep: async (step) => {
       events.executedSteps.push(step);
     },
@@ -76,7 +79,8 @@ function createRouter(overrides = {}) {
     getCurrentLuckmailPurchase: () => null,
     getPendingAutoRunTimerPlan: () => null,
     getSourceLabel: () => '',
-    getState: async () => overrides.state || { stepStatuses: { 3: 'pending' } },
+    getState: overrides.getState || (async () => ({ ...state })),
+    getStep8PageState: overrides.getStep8PageState || (async () => null),
     getStepDefinitionForState: overrides.getStepDefinitionForState,
     getStepIdsForState: overrides.getStepIdsForState,
     getLastStepIdForState: overrides.getLastStepIdForState,
@@ -111,6 +115,11 @@ function createRouter(overrides = {}) {
     notifyStepError: (step, error) => {
       events.notifyErrors.push({ step, error });
     },
+    phoneVerificationHelpers: overrides.phoneVerificationHelpers || {
+      completePhoneVerificationFlow: async (...args) => {
+        events.phoneVerificationRuns.push(args);
+      },
+    },
     patchHotmailAccount: async () => {},
     registerTab: async () => {},
     requestStop: async () => {},
@@ -137,13 +146,29 @@ function createRouter(overrides = {}) {
     setPersistentSettings: async () => {},
     setState: async (updates) => {
       events.stateUpdates.push(updates);
+      state = { ...state, ...updates };
     },
+    setDisplayStepStatus: overrides.setDisplayStepStatus || (async (stepKey, status) => {
+      events.displayStepStatuses.push({ stepKey, status });
+      const nextStatuses = { ...(state.displayStepStatuses || {}) };
+      if (status === 'pending') {
+        delete nextStatuses[stepKey];
+      } else {
+        nextStatuses[stepKey] = status;
+      }
+      state = { ...state, displayStepStatuses: nextStatuses };
+    }),
     setStepStatus: async (step, status) => {
       events.stepStatuses.push({ step, status });
     },
     skipAutoRunCountdown: async () => false,
     skipStep: async () => {},
     startAutoRunLoop: async () => {},
+    shouldShowPhoneVerificationDisplayStepForState: overrides.shouldShowPhoneVerificationDisplayStepForState || ((nextState = {}) => (
+      String(nextState.activeFlowId || 'openai').trim().toLowerCase() === 'openai'
+      && Boolean(nextState.phoneVerificationEnabled)
+      && String(nextState.signupMethod || 'email').trim().toLowerCase() === 'email'
+    )),
     syncHotmailAccounts: async () => {},
     testHotmailAccountMailAccess: async () => {},
     upsertHotmailAccount: async () => {},
@@ -621,4 +646,88 @@ test('message router ignores stale step 2 completion while auto-run is already o
   assert.deepStrictEqual(events.notifyCompletions, []);
   assert.deepStrictEqual(events.emailStates, []);
   assert.equal(events.logs.some(({ message }) => /忽略过期的步骤 2 完成消息/.test(message)), true);
+});
+
+test('message router executes display-only phone verification step through background helper flow', async () => {
+  const { router, events } = createRouter({
+    state: {
+      activeFlowId: 'openai',
+      phoneVerificationEnabled: true,
+      signupMethod: 'email',
+      stepStatuses: {
+        7: 'completed',
+        8: 'completed',
+        9: 'pending',
+        10: 'pending',
+      },
+      displayStepStatuses: {},
+    },
+    getStepIdsForState: () => [7, 8, 9, 10],
+    getStepDefinitionForState: (step) => ({
+      7: { key: 'oauth-login' },
+      8: { key: 'fetch-login-code' },
+      9: { key: 'confirm-oauth' },
+      10: { key: 'platform-verify' },
+    }[step] || null),
+    getTabId: async () => 321,
+    getStep8PageState: async () => ({
+      addPhonePage: true,
+      phoneVerificationPage: false,
+      consentReady: false,
+      url: 'https://auth.openai.com/add-phone',
+    }),
+  });
+
+  const response = await router.handleMessage({
+    type: 'EXECUTE_STEP',
+    source: 'sidepanel',
+    payload: { displayStepKey: 'phone-verification' },
+  }, {});
+
+  assert.equal(response.ok, true);
+  assert.equal(response.status, 'completed');
+  assert.deepStrictEqual(events.invalidations, [{ step: 8, options: { logLabel: '手机号验证重新执行' } }]);
+  assert.deepStrictEqual(events.displayStepStatuses, [
+    { stepKey: 'phone-verification', status: 'running' },
+    { stepKey: 'phone-verification', status: 'completed' },
+  ]);
+  assert.equal(events.phoneVerificationRuns.length, 1);
+});
+
+test('message router skips display-only phone verification step independently from real steps', async () => {
+  const { router, events } = createRouter({
+    state: {
+      activeFlowId: 'openai',
+      phoneVerificationEnabled: true,
+      signupMethod: 'email',
+      stepStatuses: {
+        7: 'completed',
+        8: 'completed',
+        9: 'pending',
+        10: 'pending',
+      },
+      displayStepStatuses: {},
+    },
+    getStepIdsForState: () => [7, 8, 9, 10],
+    getStepDefinitionForState: (step) => ({
+      7: { key: 'oauth-login' },
+      8: { key: 'fetch-login-code' },
+      9: { key: 'confirm-oauth' },
+      10: { key: 'platform-verify' },
+    }[step] || null),
+  });
+
+  const response = await router.handleMessage({
+    type: 'SKIP_STEP',
+    source: 'sidepanel',
+    payload: { displayStepKey: 'phone-verification' },
+  }, {});
+
+  assert.equal(response.ok, true);
+  assert.equal(response.status, 'skipped');
+  assert.deepStrictEqual(events.invalidations, [{ step: 8, options: { logLabel: '手机号验证手动跳过' } }]);
+  assert.deepStrictEqual(events.displayStepStatuses, [
+    { stepKey: 'phone-verification', status: 'skipped' },
+  ]);
+  assert.deepStrictEqual(events.stepStatuses, []);
 });

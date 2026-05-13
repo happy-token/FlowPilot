@@ -2128,7 +2128,7 @@ function updateConfigMenuControls() {
   const importLocked = disabled
     || contributionModeEnabled
     || currentAutoRun.autoRunning
-    || Object.values(getStepStatuses()).some((status) => status === 'running');
+    || hasAnyRunningStep();
   if (btnConfigMenu) {
     btnConfigMenu.disabled = disabled || contributionModeEnabled;
     btnConfigMenu.setAttribute('aria-expanded', String(configMenuOpen));
@@ -2210,10 +2210,19 @@ function getFirstUnfinishedStep(state = latestState) {
 
 function getRunningSteps(state = latestState) {
   const statuses = getStepStatuses(state);
-  return Object.entries(statuses)
+  const runningSteps = Object.entries(statuses)
     .filter(([, status]) => status === 'running')
     .map(([step]) => Number(step))
     .sort((a, b) => a - b);
+  const runningDisplayEntry = findDisplayStepEntryByStatuses(['running'], state, statuses);
+  if (runningDisplayEntry) {
+    const displayStepId = Number(runningDisplayEntry.displayStepId);
+    if (Number.isFinite(displayStepId) && !runningSteps.includes(displayStepId)) {
+      runningSteps.push(displayStepId);
+      runningSteps.sort((a, b) => a - b);
+    }
+  }
+  return runningSteps;
 }
 
 function hasSavedProgress(state = latestState) {
@@ -2222,9 +2231,7 @@ function hasSavedProgress(state = latestState) {
 }
 
 function isContributionModeSwitchBlocked(state = latestState) {
-  const statuses = getStepStatuses(state);
-  const anyRunning = Object.values(statuses).some((status) => status === 'running');
-  return anyRunning || isAutoRunLockedPhase() || isAutoRunPausedPhase() || isAutoRunScheduledPhase();
+  return hasAnyRunningStep(state) || isAutoRunLockedPhase() || isAutoRunPausedPhase() || isAutoRunScheduledPhase();
 }
 
 function shouldOfferAutoModeChoice(state = latestState) {
@@ -2544,9 +2551,7 @@ function isContributionButtonLocked() {
     return false;
   }
 
-  const statuses = getStepStatuses();
-  const anyRunning = Object.values(statuses).some((status) => status === 'running');
-  return anyRunning;
+  return hasAnyRunningStep();
 }
 
 function isAutoRunLockedPhase() {
@@ -8562,20 +8567,21 @@ function applyAutoRunStatus(payload = currentAutoRun) {
   updateAutoDelayInputState();
   updateFallbackThreadIntervalInputState();
   syncScheduledCountdownTicker();
-  updateStopButtonState(scheduled || paused || locked || Object.values(getStepStatuses()).some(status => status === 'running'));
+  updateStopButtonState(scheduled || paused || locked || hasAnyRunningStep());
   updateConfigMenuControls();
   renderContributionMode();
 }
 
 function initializeManualStepActions() {
   document.querySelectorAll('.step-row').forEach((row) => {
-    if (row.dataset.displayOnly === 'true') {
-      return;
-    }
     if (row.querySelector('.step-actions')) {
       return;
     }
+    const displayOnly = row.dataset.displayOnly === 'true';
     const step = Number(row.dataset.step);
+    const stepKey = String(row.dataset.stepKey || '').trim();
+    const displayStepId = String(row.dataset.displayStepId || '').trim();
+    const stepLabel = displayStepId || (displayOnly ? DISPLAY_PHONE_VERIFICATION_TITLE : String(step));
     const statusEl = row.querySelector('.step-status');
     if (!statusEl) return;
 
@@ -8585,14 +8591,20 @@ function initializeManualStepActions() {
     const manualBtn = document.createElement('button');
     manualBtn.type = 'button';
     manualBtn.className = 'step-manual-btn';
-    manualBtn.dataset.step = String(step);
-    manualBtn.title = '跳过此步';
-    manualBtn.setAttribute('aria-label', `跳过步骤 ${step}`);
+    manualBtn.dataset.step = displayOnly ? '' : String(step);
+    manualBtn.dataset.stepKey = stepKey;
+    manualBtn.dataset.displayOnly = displayOnly ? 'true' : 'false';
+    manualBtn.title = '\u8df3\u8fc7\u6b64\u6b65\u9aa4';
+    manualBtn.setAttribute('aria-label', `\u8df3\u8fc7\u6b65\u9aa4 ${stepLabel}`);
     manualBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="13 17 18 12 13 7"/><polyline points="6 17 11 12 6 7"/></svg>';
     manualBtn.addEventListener('click', async (event) => {
       event.stopPropagation();
       try {
-        await handleSkipStep(step);
+        if (displayOnly) {
+          await handleSkipDisplayStep(stepKey);
+        } else {
+          await handleSkipStep(step);
+        }
       } catch (err) {
         showToast(err.message, 'error');
       }
@@ -8612,13 +8624,10 @@ function renderStepsList() {
     const displayOnly = Boolean(step.displayOnly);
     const executableStepId = displayOnly ? '' : String(step.executableStepId || step.id || '');
     const displayStepId = String(step.displayStepId || step.id || '');
-    const disabledAttrs = displayOnly
-      ? ' disabled aria-disabled="true" tabindex="-1"'
-      : '';
     return `
     <div class="step-row${displayOnly ? ' step-display-only' : ''}" data-step="${escapeHtml(executableStepId)}" data-step-key="${escapeHtml(step.key)}" data-display-step-id="${escapeHtml(displayStepId)}" data-display-only="${displayOnly ? 'true' : 'false'}">
       <div class="step-indicator" data-step="${escapeHtml(executableStepId)}"><span class="step-num">${escapeHtml(displayStepId)}</span></div>
-      <button class="step-btn" data-step="${escapeHtml(executableStepId)}" data-step-key="${escapeHtml(step.key)}" data-display-only="${displayOnly ? 'true' : 'false'}"${disabledAttrs}>${escapeHtml(step.title)}</button>
+      <button class="step-btn" data-step="${escapeHtml(executableStepId)}" data-step-key="${escapeHtml(step.key)}" data-display-only="${displayOnly ? 'true' : 'false'}">${escapeHtml(step.title)}</button>
       <span class="step-status" data-step="${escapeHtml(executableStepId)}" data-display-step-id="${escapeHtml(displayStepId)}"></span>
     </div>
   `;
@@ -10762,18 +10771,26 @@ function renderStepStatuses(state = latestState) {
     renderSingleStepStatus(step, statuses[step]);
   }
   for (const step of getDisplayStepDefinitions().filter((entry) => entry.displayOnly)) {
-    renderDisplayOnlyStepStatus(step, getDisplayStepStatus(step, statuses));
+    renderDisplayOnlyStepStatus(step, getDisplayStepStatus(step, statuses, state));
   }
   updateProgressCounter();
 }
 
-function getDisplayStepStatus(step, statuses = getStepStatuses()) {
+function getDisplayStepStatuses(state = latestState) {
+  return state?.displayStepStatuses && typeof state.displayStepStatuses === 'object'
+    ? state.displayStepStatuses
+    : {};
+}
+
+function getDisplayStepStatus(step, statuses = getStepStatuses(), state = latestState) {
   if (!step?.displayOnly) {
     return statuses?.[Number(step?.executableStepId || step?.id)] || 'pending';
   }
-  const previousStep = Number(step.previousExecutableStepId) || 0;
-  const previousStatus = previousStep ? statuses?.[previousStep] : '';
-  return isDoneStatus(previousStatus) ? 'completed' : 'pending';
+  const displayStatuses = getDisplayStepStatuses(state);
+  const normalizedStatus = String(displayStatuses[String(step?.key || '')] || '').trim().toLowerCase();
+  return Object.prototype.hasOwnProperty.call(STATUS_ICONS, normalizedStatus)
+    ? normalizedStatus
+    : 'pending';
 }
 
 function renderDisplayOnlyStepStatus(step, status) {
@@ -10792,8 +10809,33 @@ function renderDisplayOnlyStepStatus(step, status) {
 function getDisplayStepProgress(state = latestState) {
   const statuses = getStepStatuses(state);
   const displaySteps = getDisplayStepDefinitions();
-  const completed = displaySteps.filter((step) => isDoneStatus(getDisplayStepStatus(step, statuses))).length;
+  const completed = displaySteps.filter((step) => isDoneStatus(getDisplayStepStatus(step, statuses, state))).length;
   return { completed, total: displaySteps.length };
+}
+
+function findDisplayStepEntryByStatuses(targetStatuses, state = latestState, statuses = getStepStatuses(state)) {
+  const normalizedTargets = new Set(
+    (Array.isArray(targetStatuses) ? targetStatuses : [targetStatuses])
+      .map((status) => String(status || '').trim().toLowerCase())
+      .filter(Boolean)
+  );
+  if (!normalizedTargets.size) {
+    return null;
+  }
+  return getDisplayStepDefinitions().find((entry) => (
+    entry?.displayOnly
+    && normalizedTargets.has(getDisplayStepStatus(entry, statuses, state))
+  )) || null;
+}
+
+function hasRunningDisplayStep(state = latestState, statuses = getStepStatuses(state)) {
+  return Boolean(findDisplayStepEntryByStatuses(['running'], state, statuses));
+}
+
+function hasAnyRunningStep(state = latestState) {
+  const statuses = getStepStatuses(state);
+  return Object.values(statuses).some((status) => status === 'running')
+    || hasRunningDisplayStep(state, statuses);
 }
 
 function updateProgressCounter() {
@@ -10801,56 +10843,96 @@ function updateProgressCounter() {
   stepsProgress.textContent = `${progress.completed} / ${progress.total}`;
 }
 
+function findDisplayStepEntryIndex(displaySteps, entry) {
+  return displaySteps.findIndex((candidate) => (
+    Boolean(candidate?.displayOnly) === Boolean(entry?.displayOnly)
+    && (
+      candidate?.displayOnly
+        ? String(candidate?.key || '') === String(entry?.key || '')
+        : Number(candidate?.executableStepId || candidate?.id) === Number(entry?.executableStepId || entry?.id)
+    )
+  ));
+}
+
+function getPreviousDisplayStepStatus(displaySteps, entry, statuses = getStepStatuses(), state = latestState) {
+  const currentIndex = findDisplayStepEntryIndex(displaySteps, entry);
+  if (currentIndex <= 0) {
+    return 'completed';
+  }
+  return getDisplayStepStatus(displaySteps[currentIndex - 1], statuses, state);
+}
+
+function canRunDisplayStepEntry(entry, displaySteps, statuses = getStepStatuses(), state = latestState) {
+  if (!entry) {
+    return false;
+  }
+  const currentStatus = getDisplayStepStatus(entry, statuses, state);
+  const previousStatus = getPreviousDisplayStepStatus(displaySteps, entry, statuses, state);
+  return currentStatus !== 'running'
+    && (
+      isDoneStatus(previousStatus)
+      || currentStatus === 'failed'
+      || currentStatus === 'stopped'
+      || isDoneStatus(currentStatus)
+    );
+}
+
+function canSkipDisplayStepEntry(entry, displaySteps, statuses = getStepStatuses(), state = latestState) {
+  if (!entry) {
+    return false;
+  }
+  const currentStatus = getDisplayStepStatus(entry, statuses, state);
+  if (currentStatus === 'running' || isDoneStatus(currentStatus)) {
+    return false;
+  }
+  return isDoneStatus(getPreviousDisplayStepStatus(displaySteps, entry, statuses, state));
+}
+
 function updateButtonStates() {
-  const statuses = getStepStatuses();
-  const anyRunning = Object.values(statuses).some(s => s === 'running');
+  const state = latestState;
+  const statuses = getStepStatuses(state);
+  const displaySteps = getDisplayStepDefinitions();
+  const anyRunning = hasAnyRunningStep(state);
   const autoLocked = isAutoRunLockedPhase();
   const autoScheduled = isAutoRunScheduledPhase();
   const icloudTargetMailboxTypeValue = typeof selectIcloudTargetMailboxType !== 'undefined'
     ? selectIcloudTargetMailboxType?.value
     : latestState?.icloudTargetMailboxType;
 
-  for (const step of STEP_IDS) {
-    const btn = document.querySelector(`.step-btn[data-step="${step}"]`);
+  for (const entry of displaySteps) {
+    const btn = entry.displayOnly
+      ? document.querySelector(`.step-row[data-display-only="true"][data-step-key="${entry.key}"] .step-btn`)
+      : document.querySelector(`.step-btn[data-step="${entry.executableStepId}"]`);
     if (!btn) continue;
 
     if (anyRunning || autoLocked || autoScheduled) {
       btn.disabled = true;
-    } else if (step === 1) {
-      btn.disabled = false;
     } else {
-      const currentIndex = STEP_IDS.indexOf(step);
-      const prevStep = currentIndex > 0 ? STEP_IDS[currentIndex - 1] : null;
-      const prevStatus = prevStep === null ? 'completed' : statuses[prevStep];
-      const currentStatus = statuses[step];
-      btn.disabled = !(isDoneStatus(prevStatus) || currentStatus === 'failed' || isDoneStatus(currentStatus) || currentStatus === 'stopped');
+      btn.disabled = !canRunDisplayStepEntry(entry, displaySteps, statuses, state);
     }
   }
 
   document.querySelectorAll('.step-manual-btn').forEach((btn) => {
+    const displayOnly = btn.dataset.displayOnly === 'true';
     const step = Number(btn.dataset.step);
-    const currentStatus = statuses[step];
-    const currentIndex = STEP_IDS.indexOf(step);
-    const prevStep = currentIndex > 0 ? STEP_IDS[currentIndex - 1] : null;
-    const prevStatus = prevStep === null ? 'completed' : statuses[prevStep];
+    const entry = displayOnly
+      ? displaySteps.find((candidate) => candidate.displayOnly && String(candidate.key || '') === String(btn.dataset.stepKey || ''))
+      : displaySteps.find((candidate) => !candidate.displayOnly && Number(candidate.executableStepId || candidate.id) === step);
+    const stepLabel = entry?.displayStepId || (displayOnly ? DISPLAY_PHONE_VERIFICATION_TITLE : String(step || ''));
+    const canSkip = displayOnly
+      ? canSkipDisplayStepEntry(entry, displaySteps, statuses, state)
+      : (SKIPPABLE_STEPS.has(step) && canSkipDisplayStepEntry(entry, displaySteps, statuses, state));
 
-    if (!SKIPPABLE_STEPS.has(step) || anyRunning || autoLocked || autoScheduled || currentStatus === 'running' || isDoneStatus(currentStatus)) {
+    if (!entry || anyRunning || autoLocked || autoScheduled || !canSkip) {
       btn.style.display = 'none';
       btn.disabled = true;
       btn.title = '当前不可跳过';
       return;
     }
 
-    if (prevStep !== null && !isDoneStatus(prevStatus)) {
-      btn.style.display = 'none';
-      btn.disabled = true;
-      btn.title = `请先完成步骤 ${prevStep}`;
-      return;
-    }
-
     btn.style.display = '';
     btn.disabled = false;
-    btn.title = `跳过步骤 ${step}`;
+    btn.title = `跳过步骤 ${stepLabel}`;
   });
 
   btnReset.disabled = anyRunning || autoScheduled || isAutoRunPausedPhase() || autoLocked;
@@ -10924,6 +11006,13 @@ function updateStatusDisplay(state) {
     return;
   }
 
+  const runningDisplayEntry = findDisplayStepEntryByStatuses(['running'], state);
+  if (runningDisplayEntry) {
+    displayStatus.textContent = `步骤 ${runningDisplayEntry.displayStepId || runningDisplayEntry.title} 运行中...`;
+    statusBar.classList.add('running');
+    return;
+  }
+
   const running = Object.entries(state.stepStatuses).find(([, s]) => s === 'running');
   if (running) {
     displayStatus.textContent = `步骤 ${running[0]} 运行中...`;
@@ -10937,10 +11026,24 @@ function updateStatusDisplay(state) {
     return;
   }
 
+  const failedDisplayEntry = findDisplayStepEntryByStatuses(['failed'], state);
+  if (failedDisplayEntry) {
+    displayStatus.textContent = `步骤 ${failedDisplayEntry.displayStepId || failedDisplayEntry.title} 失败`;
+    statusBar.classList.add('failed');
+    return;
+  }
+
   const failed = Object.entries(state.stepStatuses).find(([, s]) => s === 'failed');
   if (failed) {
     displayStatus.textContent = `步骤 ${failed[0]} 失败`;
     statusBar.classList.add('failed');
+    return;
+  }
+
+  const stoppedDisplayEntry = findDisplayStepEntryByStatuses(['stopped'], state);
+  if (stoppedDisplayEntry) {
+    displayStatus.textContent = `步骤 ${stoppedDisplayEntry.displayStepId || stoppedDisplayEntry.title} 已停止`;
+    statusBar.classList.add('stopped');
     return;
   }
 
@@ -11721,6 +11824,33 @@ async function handleSkipStep(step) {
   showToast(`步骤 ${step} 已跳过`, 'success', 2200);
 }
 
+async function handleSkipDisplayStep(stepKey) {
+  if (isAutoRunPausedPhase()) {
+    const takeoverResponse = await chrome.runtime.sendMessage({
+      type: 'TAKEOVER_AUTO_RUN',
+      source: 'sidepanel',
+      payload: {},
+    });
+    if (takeoverResponse?.error) {
+      throw new Error(takeoverResponse.error);
+    }
+  }
+
+  await persistCurrentSettingsForAction();
+
+  const response = await chrome.runtime.sendMessage({
+    type: 'SKIP_STEP',
+    source: 'sidepanel',
+    payload: { displayStepKey: stepKey },
+  });
+
+  if (response?.error) {
+    throw new Error(response.error);
+  }
+
+  showToast('手机号验证步骤已跳过', 'success', 2200);
+}
+
 // ============================================================
 // Button Handlers
 // ============================================================
@@ -11730,15 +11860,34 @@ stepsList?.addEventListener('click', async (event) => {
   if (!btn) {
     return;
   }
-  if (btn.dataset.displayOnly === 'true') {
-    return;
-  }
   try {
+    const displayOnly = btn.dataset.displayOnly === 'true';
+    const displayStepKey = String(btn.dataset.stepKey || '').trim();
+    const displayStepLabel = String(
+      btn.closest('.step-row')?.dataset.displayStepId
+      || (displayOnly ? DISPLAY_PHONE_VERIFICATION_TITLE : '')
+    ).trim();
     const step = Number(btn.dataset.step);
-    if (!(await maybeTakeoverAutoRun(`执行步骤 ${step}`))) {
+    if (!(await maybeTakeoverAutoRun(
+      displayOnly
+        ? `执行步骤 ${displayStepLabel || DISPLAY_PHONE_VERIFICATION_TITLE}`
+        : `执行步骤 ${step}`
+    ))) {
       return;
     }
     await persistCurrentSettingsForAction();
+    if (displayOnly) {
+      const response = await sendSidepanelMessage({
+        type: 'EXECUTE_STEP',
+        source: 'sidepanel',
+        payload: { displayStepKey },
+      });
+      if (response?.error) {
+        throw new Error(response.error);
+      }
+      return;
+    }
+
     const gpcCreateStep = getStepIdByKeyForCurrentMode('plus-checkout-create') || 6;
     if (step === gpcCreateStep && !(await ensureGpcApiKeyReadyForStart())) {
       return;
@@ -14116,6 +14265,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         email: null,
         password: null,
         stepStatuses: STEP_DEFAULT_STATUSES,
+        displayStepStatuses: {},
         logs: [],
         scheduledAutoRunAt: null,
         autoRunCountdownAt: null,
@@ -14171,6 +14321,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
     case 'DATA_UPDATED': {
       syncLatestState(message.payload);
+      const shouldRefreshDisplaySteps = Object.prototype.hasOwnProperty.call(message.payload, 'displayStepStatuses');
       if (message.payload.operationDelayEnabled !== undefined && typeof applyOperationDelayState === 'function') {
         applyOperationDelayState(message.payload);
       }
@@ -14826,6 +14977,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         });
       }
       updateAccountRunHistorySettingsUI();
+      if (shouldRefreshDisplaySteps) {
+        renderStepStatuses(latestState);
+        updateStatusDisplay(latestState);
+        updateButtonStates();
+      }
       renderContributionMode();
       void syncPlusManualConfirmationDialog();
       break;

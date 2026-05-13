@@ -183,6 +183,57 @@ return {
   assert.equal(result?.retryPage, false);
 });
 
+test('step 8 ready check marks display-only phone verification as skipped when consent page is already ready', async () => {
+  const api = new Function(`
+const updates = [];
+function throwIfStopped() {}
+async function sleepWithStop() {}
+async function ensureStep8SignupPageReady() {}
+async function getState() {
+  return {
+    activeFlowId: 'openai',
+    phoneVerificationEnabled: true,
+    signupMethod: 'email',
+    displayStepStatuses: {},
+  };
+}
+function shouldShowPhoneVerificationDisplayStepForState() {
+  return true;
+}
+function getDisplayStepStatus() {
+  return 'pending';
+}
+async function setDisplayStepStatus(stepKey, status) {
+  updates.push({ stepKey, status });
+}
+async function getStep8PageState() {
+  return {
+    url: 'https://auth.openai.com/sign-in-with-chatgpt/codex/consent',
+    retryPage: false,
+    consentPage: true,
+    consentReady: true,
+    addPhonePage: false,
+    phoneVerificationPage: false,
+  };
+}
+
+${extractFunction('waitForStep8Ready')}
+
+return {
+  updates,
+  async run() {
+    return waitForStep8Ready(88, 1000);
+  },
+};
+`)();
+
+  const result = await api.run();
+  assert.equal(result?.consentReady, true);
+  assert.deepStrictEqual(api.updates, [
+    { stepKey: 'phone-verification', status: 'skipped' },
+  ]);
+});
+
 test('step 8 click effect ignores consent-like retry snapshots and waits for real page progress', async () => {
   const api = new Function(`
 let pollCount = 0;
