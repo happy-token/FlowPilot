@@ -228,20 +228,24 @@ return {
   }).some((step) => step.key === 'phone-verification'), false);
 });
 
-test('sidepanel display-only phone verification pending style stays muted', () => {
+test('sidepanel display-only phone verification no longer keeps dedicated muted styling', () => {
   const css = fs.readFileSync('sidepanel/sidepanel.css', 'utf8');
-  const indicatorRule = css.match(/\.step-row\.step-display-only \.step-indicator\s*\{[^}]+\}/)?.[0] || '';
-  const buttonRule = css.match(/\.step-row\.step-display-only \.step-btn:disabled\s*\{[^}]+\}/)?.[0] || '';
-  const completedButtonRule = css.match(/\.step-row\.step-display-only\.completed \.step-btn:disabled\s*\{[^}]+\}/)?.[0] || '';
+  assert.doesNotMatch(css, /\.step-row\.step-display-only \.step-indicator\s*\{/);
+  assert.doesNotMatch(css, /\.step-row\.step-display-only \.step-btn:disabled\s*\{/);
+  assert.doesNotMatch(css, /\.step-row\.step-display-only\.completed \.step-btn:disabled\s*\{/);
+  assert.doesNotMatch(css, /\.step-row\.step-display-only \.step-status\s*\{/);
+});
 
-  assert.match(indicatorRule, /background:\s*var\(--bg-surface\)/);
-  assert.match(indicatorRule, /border-color:\s*var\(--border-subtle\)/);
-  assert.match(buttonRule, /color:\s*var\(--text-muted\)/);
-  assert.match(buttonRule, /background:\s*var\(--bg-base\)/);
-  assert.match(buttonRule, /opacity:\s*0\.45/);
-  assert.doesNotMatch(indicatorRule, /blue-soft/);
-  assert.doesNotMatch(buttonRule, /blue-soft|text-secondary|opacity:\s*0\.9/);
-  assert.match(completedButtonRule, /color:\s*var\(--green\)/);
+test('sidepanel display-only phone verification keeps generic row classes and skip toast wording', () => {
+  const renderStepsListSource = extractLastFunction('renderStepsList');
+  const renderDisplayOnlyStepStatusSource = extractLastFunction('renderDisplayOnlyStepStatus');
+  const handleSkipDisplayStepSource = extractLastFunction('handleSkipDisplayStep');
+
+  assert.match(renderStepsListSource, /<div class="step-row"/);
+  assert.doesNotMatch(renderStepsListSource, /step-display-only/);
+  assert.match(renderDisplayOnlyStepStatusSource, /row\.className = `step-row \$\{normalizedStatus\}`;/);
+  assert.match(handleSkipDisplayStepSource, /showToast\(`步骤 \$\{stepLabel\} 已跳过`/);
+  assert.doesNotMatch(handleSkipDisplayStepSource, /手机号验证步骤已跳过/);
 });
 
 test('sidepanel phone verification display changes without changing executable step ids', () => {

@@ -8581,14 +8581,23 @@ function initializeManualStepActions() {
     manualBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="13 17 18 12 13 7"/><polyline points="6 17 11 12 6 7"/></svg>';
     manualBtn.addEventListener('click', async (event) => {
       event.stopPropagation();
+      if (manualBtn.disabled) {
+        return;
+      }
+      manualBtn.disabled = true;
       try {
         if (displayOnly) {
-          await handleSkipDisplayStep(stepKey);
+          await handleSkipDisplayStep({
+            stepKey,
+            stepLabel,
+          });
         } else {
           await handleSkipStep(step);
         }
       } catch (err) {
         showToast(err.message, 'error');
+      } finally {
+        manualBtn.disabled = false;
       }
     });
 
@@ -8607,7 +8616,7 @@ function renderStepsList() {
     const executableStepId = displayOnly ? '' : String(step.executableStepId || step.id || '');
     const displayStepId = String(step.displayStepId || step.id || '');
     return `
-    <div class="step-row${displayOnly ? ' step-display-only' : ''}" data-step="${escapeHtml(executableStepId)}" data-step-key="${escapeHtml(step.key)}" data-display-step-id="${escapeHtml(displayStepId)}" data-display-only="${displayOnly ? 'true' : 'false'}">
+    <div class="step-row" data-step="${escapeHtml(executableStepId)}" data-step-key="${escapeHtml(step.key)}" data-display-step-id="${escapeHtml(displayStepId)}" data-display-only="${displayOnly ? 'true' : 'false'}">
       <div class="step-indicator" data-step="${escapeHtml(executableStepId)}"><span class="step-num">${escapeHtml(displayStepId)}</span></div>
       <button class="step-btn" data-step="${escapeHtml(executableStepId)}" data-step-key="${escapeHtml(step.key)}" data-display-only="${displayOnly ? 'true' : 'false'}">${escapeHtml(step.title)}</button>
       <span class="step-status" data-step="${escapeHtml(executableStepId)}" data-display-step-id="${escapeHtml(displayStepId)}"></span>
@@ -10789,7 +10798,7 @@ function renderDisplayOnlyStepStatus(step, status) {
     const normalizedStatus = status || 'pending';
     const statusEl = row.querySelector('.step-status');
     if (statusEl) statusEl.textContent = STATUS_ICONS[normalizedStatus] || '';
-    row.className = `step-row step-display-only ${normalizedStatus}`;
+    row.className = `step-row ${normalizedStatus}`;
   });
 }
 
@@ -11811,7 +11820,11 @@ async function handleSkipStep(step) {
   showToast(`步骤 ${step} 已跳过`, 'success', 2200);
 }
 
-async function handleSkipDisplayStep(stepKey) {
+async function handleSkipDisplayStep(options = {}) {
+  const stepKey = typeof options === 'string' ? options : String(options?.stepKey || '').trim();
+  const stepLabel = typeof options === 'string'
+    ? DISPLAY_PHONE_VERIFICATION_TITLE
+    : String(options?.stepLabel || DISPLAY_PHONE_VERIFICATION_TITLE).trim();
   if (isAutoRunPausedPhase()) {
     const takeoverResponse = await chrome.runtime.sendMessage({
       type: 'TAKEOVER_AUTO_RUN',
@@ -11835,7 +11848,7 @@ async function handleSkipDisplayStep(stepKey) {
     throw new Error(response.error);
   }
 
-  showToast('手机号验证步骤已跳过', 'success', 2200);
+  showToast(`步骤 ${stepLabel} 已跳过`, 'success', 2200);
 }
 
 // ============================================================

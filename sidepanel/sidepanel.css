@@ -2685,25 +2685,6 @@ header {
 .step-row.manual_completed .step-num,
 .step-row.skipped .step-num { color: var(--blue); }
 
-.step-row.step-display-only .step-indicator {
-  border-style: dashed;
-  border-color: var(--border-subtle);
-  background: var(--bg-surface);
-}
-
-.step-row.step-display-only .step-num {
-  color: var(--text-muted);
-}
-
-.step-row.step-display-only.completed .step-indicator {
-  border-color: var(--green);
-  background: var(--green-soft);
-}
-
-.step-row.step-display-only.completed .step-num {
-  color: var(--green);
-}
-
 /* Step Button */
 .step-btn {
   flex: 1;
@@ -2729,24 +2710,6 @@ header {
 .step-row.stopped .step-btn { border-color: var(--cyan); color: var(--cyan); }
 .step-row.manual_completed .step-btn,
 .step-row.skipped .step-btn { border-color: rgba(37, 99, 235, 0.25); color: var(--blue); opacity: 0.82; }
-.step-row.step-display-only .step-btn:disabled {
-  color: var(--text-muted);
-  background: var(--bg-base);
-  border-color: var(--border-subtle);
-  cursor: default;
-  opacity: 0.45;
-}
-
-.step-row.step-display-only.completed .step-btn:disabled {
-  color: var(--green);
-  background: var(--green-soft);
-  border-color: var(--green);
-  opacity: 0.82;
-}
-
-.step-row.step-display-only .step-status {
-  width: 48px;
-}
 
 .step-actions {
   display: flex;
