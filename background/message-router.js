@@ -31,6 +31,7 @@
       doesNodeUseCompletionSignal,
       ensureMail2925MailboxSession,
       ensureManualInteractionAllowed,
+      assertNodeExecutionAllowedForState,
       executeNode,
       executeNodeViaCompletionSignal,
       exportSettingsBundle,
@@ -1165,6 +1166,9 @@
           if (message.source === 'sidepanel') {
             await lockAutomationWindowFromMessage(message, sender);
             await ensureManualInteractionAllowed('手动执行节点');
+          }
+          if (typeof assertNodeExecutionAllowedForState === 'function') {
+            assertNodeExecutionAllowedForState(nodeId, requestState, '手动执行节点');
           }
           if (message.source === 'sidepanel') {
             await ensureManualStepPrerequisites(resolvedStep);

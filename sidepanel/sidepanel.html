@@ -565,6 +565,26 @@
           <button id="btn-fetch-email" class="btn btn-outline btn-sm data-inline-btn" type="button">获取</button>
         </div>
       </div>
+      <div class="data-row" id="row-step-execution-range">
+        <span class="data-label">执行范围</span>
+        <div class="data-inline setting-pair step-execution-range-setting">
+          <div class="setting-group setting-group-primary">
+            <label class="toggle-switch" for="input-step-execution-range-enabled" title="开启后，只执行指定起止步骤，范围外步骤禁用">
+              <input type="checkbox" id="input-step-execution-range-enabled" />
+              <span class="toggle-switch-track" aria-hidden="true">
+                <span class="toggle-switch-thumb"></span>
+              </span>
+              <span>启用</span>
+            </label>
+          </div>
+          <div class="setting-group setting-group-secondary step-range-controls">
+            <span class="setting-caption">步骤</span>
+            <input type="number" id="input-step-execution-range-from" class="data-input auto-delay-input step-range-input" value="1" min="1" step="1" title="允许执行的起始步骤" />
+            <span class="data-unit">到</span>
+            <input type="number" id="input-step-execution-range-to" class="data-input auto-delay-input step-range-input" value="1" min="1" step="1" title="允许执行的结束步骤" />
+          </div>
+        </div>
+      </div>
       <div class="data-row module-divider-start" id="row-auto-delay-settings">
         <span class="data-label">第六步</span>
         <div class="data-inline setting-pair auto-delay-setting-pair">

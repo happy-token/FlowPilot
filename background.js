@@ -958,6 +958,7 @@ const PERSISTED_SETTING_DEFAULTS = {
   autoRunDelayMinutes: 30,
   autoStepDelaySeconds: null,
   step6CookieCleanupEnabled: false,
+  stepExecutionRangeByFlow: {},
   phoneVerificationEnabled: false,
   phoneSignupReloginAfterBindEmailEnabled: false,
   phoneSmsReuseEnabled: DEFAULT_HERO_SMS_REUSE_ENABLED,
@@ -2693,6 +2694,81 @@ function normalizeSub2ApiAccountPriority(value, fallback = DEFAULT_SUB2API_ACCOU
   return numeric;
 }
 
+function isPlainObjectValue(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function normalizeStepExecutionRangeFlowId(value = '', fallback = DEFAULT_ACTIVE_FLOW_ID) {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === 'codex') {
+    return DEFAULT_ACTIVE_FLOW_ID;
+  }
+  const fallbackValue = String(fallback || '').trim().toLowerCase();
+  return normalized || fallbackValue || DEFAULT_ACTIVE_FLOW_ID;
+}
+
+function hasStepExecutionRangeShape(value) {
+  return isPlainObjectValue(value) && (
+    Object.prototype.hasOwnProperty.call(value, 'enabled')
+    || Object.prototype.hasOwnProperty.call(value, 'fromStep')
+    || Object.prototype.hasOwnProperty.call(value, 'toStep')
+    || Object.prototype.hasOwnProperty.call(value, 'from')
+    || Object.prototype.hasOwnProperty.call(value, 'to')
+  );
+}
+
+function normalizePositiveStepNumber(value, fallback = 0) {
+  const numeric = Math.floor(Number(value));
+  if (Number.isInteger(numeric) && numeric > 0) {
+    return numeric;
+  }
+  const fallbackNumber = Math.floor(Number(fallback));
+  return Number.isInteger(fallbackNumber) && fallbackNumber > 0 ? fallbackNumber : 0;
+}
+
+function normalizeStepExecutionRangeEntry(value = {}) {
+  const source = isPlainObjectValue(value) ? value : {};
+  const rawFrom = Object.prototype.hasOwnProperty.call(source, 'fromStep') ? source.fromStep : source.from;
+  const rawTo = Object.prototype.hasOwnProperty.call(source, 'toStep') ? source.toStep : source.to;
+  let fromStep = normalizePositiveStepNumber(rawFrom, 1);
+  let toStep = normalizePositiveStepNumber(rawTo, fromStep || 1);
+  if (fromStep > 0 && toStep > 0 && fromStep > toStep) {
+    [fromStep, toStep] = [toStep, fromStep];
+  }
+  const hasBounds = fromStep > 0 && toStep > 0;
+  const enabled = Object.prototype.hasOwnProperty.call(source, 'enabled')
+    ? Boolean(source.enabled)
+    : hasBounds;
+  return {
+    enabled: Boolean(enabled && hasBounds),
+    fromStep: fromStep || 1,
+    toStep: toStep || fromStep || 1,
+  };
+}
+
+function normalizeStepExecutionRangeByFlow(value = {}) {
+  const source = isPlainObjectValue(value) ? value : {};
+  const next = {};
+
+  if (hasStepExecutionRangeShape(source)) {
+    next[DEFAULT_ACTIVE_FLOW_ID] = normalizeStepExecutionRangeEntry(source);
+    return next;
+  }
+
+  for (const [rawFlowId, rawEntry] of Object.entries(source)) {
+    if (!hasStepExecutionRangeShape(rawEntry)) {
+      continue;
+    }
+    const flowId = normalizeStepExecutionRangeFlowId(rawFlowId, '');
+    if (!flowId) {
+      continue;
+    }
+    next[flowId] = normalizeStepExecutionRangeEntry(rawEntry);
+  }
+
+  return next;
+}
+
 function normalizePersistentSettingValue(key, value) {
   switch (key) {
     case 'panelMode':
@@ -2911,6 +2987,9 @@ function normalizePersistentSettingValue(key, value) {
     case 'operationDelayEnabled':
       return typeof value === 'boolean' ? value : true;
     case 'step6CookieCleanupEnabled':
+      return Boolean(value);
+    case 'stepExecutionRangeByFlow':
+      return normalizeStepExecutionRangeByFlow(value);
     case 'phoneVerificationEnabled':
     case 'phoneSignupReloginAfterBindEmailEnabled':
     case 'phoneSmsReuseEnabled':
@@ -8545,6 +8624,55 @@ function isStepDoneStatus(status) {
   return status === 'completed' || status === 'manual_completed' || status === 'skipped';
 }
 
+function getStepExecutionRangeForState(state = {}, flowId = '') {
+  const config = normalizeStepExecutionRangeByFlow(state?.stepExecutionRangeByFlow || {});
+  const normalizedFlowId = normalizeStepExecutionRangeFlowId(
+    flowId || state?.activeFlowId || state?.flowId || DEFAULT_ACTIVE_FLOW_ID
+  );
+  return config[normalizedFlowId] || { enabled: false, fromStep: 1, toStep: 1 };
+}
+
+function isStepAllowedByExecutionRangeForState(step, state = {}) {
+  const numericStep = Math.floor(Number(step));
+  if (!Number.isInteger(numericStep) || numericStep <= 0) {
+    return true;
+  }
+  const range = getStepExecutionRangeForState(state);
+  if (!range.enabled) {
+    return true;
+  }
+  return numericStep >= range.fromStep && numericStep <= range.toStep;
+}
+
+function isNodeExecutionAllowedForState(nodeId, state = {}) {
+  const normalizedNodeId = String(nodeId || '').trim();
+  if (!normalizedNodeId) {
+    return false;
+  }
+  const step = getStepIdByNodeIdForState(normalizedNodeId, state);
+  return isStepAllowedByExecutionRangeForState(step, state);
+}
+
+function getExecutionAllowedNodeIdsForState(state = {}) {
+  const nodeIds = getNodeIdsForState(state);
+  const range = getStepExecutionRangeForState(state);
+  if (!range.enabled) {
+    return nodeIds;
+  }
+  return nodeIds.filter((nodeId) => isNodeExecutionAllowedForState(nodeId, state));
+}
+
+function assertNodeExecutionAllowedForState(nodeId, state = {}, actionLabel = '执行节点') {
+  const normalizedNodeId = String(nodeId || '').trim();
+  if (isNodeExecutionAllowedForState(normalizedNodeId, state)) {
+    return;
+  }
+  const range = getStepExecutionRangeForState(state);
+  const step = getStepIdByNodeIdForState(normalizedNodeId, state);
+  const stepLabel = Number.isInteger(Number(step)) && Number(step) > 0 ? `步骤 ${step}` : `节点 ${normalizedNodeId}`;
+  throw new Error(`${actionLabel}已被当前 flow 的执行范围禁用：${stepLabel} 不在 ${range.fromStep}-${range.toStep} 内。`);
+}
+
 function normalizeStatusMapForNodes(statuses = {}, state = {}) {
   const candidate = statuses && typeof statuses === 'object' && !Array.isArray(statuses) ? statuses : {};
   const nodeIds = new Set(getNodeIdsForState(state));
@@ -8567,10 +8695,7 @@ function normalizeStatusMapForNodes(statuses = {}, state = {}) {
 function getFirstUnfinishedNodeId(statuses = {}, stateOverride = null) {
   const state = stateOverride || {};
   const nodeStatuses = normalizeStatusMapForNodes(statuses, state);
-  if (workflowEngine?.getFirstUnfinishedNodeId) {
-    return workflowEngine.getFirstUnfinishedNodeId(nodeStatuses, state);
-  }
-  const nodeIds = getNodeIdsForState(state);
+  const nodeIds = getExecutionAllowedNodeIdsForState(state);
   for (const nodeId of nodeIds) {
     if (!isStepDoneStatus(nodeStatuses[nodeId] || 'pending')) {
       return nodeId;
@@ -8591,11 +8716,8 @@ function getFirstUnfinishedStep(statuses = {}, stateOverride = null) {
 function hasSavedNodeProgress(statuses = {}, stateOverride = null) {
   const state = stateOverride || {};
   const nodeStatuses = normalizeStatusMapForNodes(statuses, state);
-  if (workflowEngine?.hasSavedProgress) {
-    return workflowEngine.hasSavedProgress(nodeStatuses, state);
-  }
   const merged = { ...DEFAULT_STATE.nodeStatuses, ...nodeStatuses };
-  return getNodeIdsForState(state).some((nodeId) => (merged[nodeId] || 'pending') !== 'pending');
+  return getExecutionAllowedNodeIdsForState(state).some((nodeId) => (merged[nodeId] || 'pending') !== 'pending');
 }
 
 function hasSavedProgress(statuses = {}, stateOverride = null) {
@@ -9453,10 +9575,16 @@ async function skipNode(nodeId) {
   if (isStepDoneStatus(currentStatus)) {
     throw new Error(`节点 ${normalizedNodeId} 已完成，无需再跳过。`);
   }
+  if (typeof assertNodeExecutionAllowedForState === 'function') {
+    assertNodeExecutionAllowedForState(normalizedNodeId, state, '跳过节点');
+  }
 
-  const currentIndex = activeNodeIds.indexOf(normalizedNodeId);
+  const allowedNodeIds = typeof getExecutionAllowedNodeIdsForState === 'function'
+    ? getExecutionAllowedNodeIdsForState(state)
+    : activeNodeIds;
+  const currentIndex = allowedNodeIds.indexOf(normalizedNodeId);
   if (currentIndex > 0) {
-    const prevNodeId = activeNodeIds[currentIndex - 1];
+    const prevNodeId = allowedNodeIds[currentIndex - 1];
     const prevStatus = statuses[prevNodeId];
     if (!isStepDoneStatus(prevStatus)) {
       throw new Error(`请先完成节点 ${prevNodeId}，再跳过节点 ${normalizedNodeId}。`);
@@ -9469,9 +9597,12 @@ async function skipNode(nodeId) {
   if (normalizedNodeId === 'open-chatgpt') {
     const latestState = await getState();
     const skippedNodes = [];
-    for (const linkedNodeId of ['submit-signup-email', 'fill-password', 'fetch-signup-code', 'fill-profile']) {
+    for (const linkedNodeId of ['submit-signup-email', 'fill-password', 'fetch-signup-code', 'fill-profile', 'wait-registration-success']) {
       const linkedStatus = latestState.nodeStatuses?.[linkedNodeId];
-      if (!isStepDoneStatus(linkedStatus) && linkedStatus !== 'running') {
+      const linkedNodeAllowed = typeof isNodeExecutionAllowedForState === 'function'
+        ? isNodeExecutionAllowedForState(linkedNodeId, latestState)
+        : true;
+      if (linkedNodeAllowed && !isStepDoneStatus(linkedStatus) && linkedStatus !== 'running') {
         await setNodeStatus(linkedNodeId, 'skipped');
         skippedNodes.push(linkedNodeId);
       }
@@ -10055,6 +10186,9 @@ async function finalizeDeferredStepExecutionError(step, error) {
 async function executeNodeViaCompletionSignal(nodeId, timeoutMs = 0) {
   const normalizedNodeId = String(nodeId || '').trim();
   const executionState = await getState();
+  if (typeof assertNodeExecutionAllowedForState === 'function') {
+    assertNodeExecutionAllowedForState(normalizedNodeId, executionState, '执行节点');
+  }
   const resolvedTimeoutMs = Number(timeoutMs) > 0
     ? timeoutMs
     : getNodeCompletionSignalTimeoutMs(normalizedNodeId, executionState);
@@ -10447,6 +10581,9 @@ async function executeNode(nodeId, options = {}) {
   }
   console.log(LOG_PREFIX, `Executing node ${normalizedNodeId}`);
   let state = await getState();
+  if (typeof assertNodeExecutionAllowedForState === 'function') {
+    assertNodeExecutionAllowedForState(normalizedNodeId, state, '执行节点');
+  }
   const step = getStepIdByNodeIdForState(normalizedNodeId, state);
   const authChainClaim = await acquireTopLevelAuthChainExecutionForNode(normalizedNodeId, state);
   if (authChainClaim.joined) {
@@ -10558,7 +10695,12 @@ async function executeNodeAndWait(nodeId, delayAfter = 2000) {
   }
   let completionPayload = null;
 
-  const delaySeconds = normalizeAutoStepDelaySeconds((await getState()).autoStepDelaySeconds, null);
+  let executionState = await getState();
+  if (typeof assertNodeExecutionAllowedForState === 'function') {
+    assertNodeExecutionAllowedForState(normalizedNodeId, executionState, '自动执行节点');
+  }
+
+  const delaySeconds = normalizeAutoStepDelaySeconds(executionState.autoStepDelaySeconds, null);
   if (delaySeconds > 0) {
     await addLog(
       `自动运行：节点 ${normalizedNodeId} 执行前额外等待 ${delaySeconds} 秒，避免节奏过快。`,
@@ -10567,7 +10709,6 @@ async function executeNodeAndWait(nodeId, delayAfter = 2000) {
     await sleepWithStop(delaySeconds * 1000);
   }
 
-  let executionState = await getState();
   const step = getStepIdByNodeIdForState(normalizedNodeId, executionState);
   const preExecutionDelayMs = getAutoRunPreExecutionDelayMsForNode(normalizedNodeId, executionState);
   if (preExecutionDelayMs > 0) {
@@ -11675,6 +11816,15 @@ async function runAutoSequenceFromNode(startNodeId, context = {}) {
   if (!normalizedStartNodeId || !getAutoRunWorkflowNodeIds(state).includes(normalizedStartNodeId)) {
     throw new Error(`自动运行无法从未知节点继续：${startNodeId}`);
   }
+  const allowedNodeIds = typeof getExecutionAllowedNodeIdsForState === 'function'
+    ? getExecutionAllowedNodeIdsForState(state)
+    : getAutoRunWorkflowNodeIds(state);
+  if (allowedNodeIds.length === 0) {
+    const range = typeof getStepExecutionRangeForState === 'function'
+      ? getStepExecutionRangeForState(state)
+      : { fromStep: 1, toStep: 1 };
+    throw new Error(`当前执行范围 ${range.fromStep}-${range.toStep} 未包含任何可执行节点。`);
+  }
   return runAutoSequenceFromNodeGraph(normalizedStartNodeId, context);
 }
 
@@ -11737,6 +11887,9 @@ async function runAutoSequenceFromNodeGraph(startNodeId, context = {}) {
   const getNodeIndex = (state, nodeId) => getAutoRunWorkflowNodeIds(state).indexOf(nodeId);
   const shouldRunNamedNode = async (nodeId) => {
     const state = await getState();
+    if (typeof isNodeExecutionAllowedForState === 'function' && !isNodeExecutionAllowedForState(nodeId, state)) {
+      return false;
+    }
     const nodeIds = getAutoRunWorkflowNodeIds(state);
     const targetIndex = nodeIds.indexOf(nodeId);
     if (targetIndex < 0) {
@@ -11930,6 +12083,10 @@ async function runAutoSequenceFromNodeGraph(startNodeId, context = {}) {
     nodeIds = getAutoRunWorkflowNodeIds(latestState);
     const nodeId = nodeIds[nodeIndex];
     if (!nodeId) {
+      nodeIndex += 1;
+      continue;
+    }
+    if (typeof isNodeExecutionAllowedForState === 'function' && !isNodeExecutionAllowedForState(nodeId, latestState)) {
       nodeIndex += 1;
       continue;
     }
@@ -12691,6 +12848,7 @@ const messageRouter = self.MultiPageBackgroundMessageRouter?.createMessageRouter
   doesNodeUseCompletionSignal,
   ensureMail2925MailboxSession,
   ensureManualInteractionAllowed,
+  assertNodeExecutionAllowedForState,
   executeNode,
   executeNodeViaCompletionSignal,
   exportSettingsBundle,

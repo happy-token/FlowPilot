@@ -8,6 +8,7 @@ const STATUS_ICONS = {
   stopped: '\u25A0',    // ■
   manual_completed: '跳',
   skipped: '跳',
+  disabled: '禁',
 };
 
 const logArea = document.getElementById('log-area');
@@ -34,6 +35,7 @@ const updateReleaseList = document.getElementById('update-release-list');
 const btnIgnoreRelease = document.getElementById('btn-ignore-release');
 const btnOpenRelease = document.getElementById('btn-open-release');
 const settingsCard = document.getElementById('settings-card');
+const selectFlow = document.getElementById('select-flow');
 const contributionModePanel = document.getElementById('contribution-mode-panel');
 const contributionModeBadge = document.getElementById('contribution-mode-badge');
 const contributionModeText = document.getElementById('contribution-mode-text');
@@ -386,6 +388,10 @@ const inputAutoDelayMinutes = document.getElementById('input-auto-delay-minutes'
 const inputAutoStepDelaySeconds = document.getElementById('input-auto-step-delay-seconds');
 const inputOperationDelayEnabled = document.getElementById('input-operation-delay-enabled');
 const inputOAuthFlowTimeoutEnabled = document.getElementById('input-oauth-flow-timeout-enabled');
+const rowStepExecutionRange = document.getElementById('row-step-execution-range');
+const inputStepExecutionRangeEnabled = document.getElementById('input-step-execution-range-enabled');
+const inputStepExecutionRangeFrom = document.getElementById('input-step-execution-range-from');
+const inputStepExecutionRangeTo = document.getElementById('input-step-execution-range-to');
 const inputVerificationResendCount = document.getElementById('input-verification-resend-count');
 const rowPhoneVerificationEnabled = document.getElementById('row-phone-verification-enabled');
 const btnTogglePhoneVerificationSection = document.getElementById('btn-toggle-phone-verification-section');
@@ -2284,6 +2290,181 @@ function isDoneStatus(status) {
   return status === 'completed' || status === 'manual_completed' || status === 'skipped';
 }
 
+function isPlainObjectValue(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function normalizeStepExecutionRangeFlowId(value = '', fallback = DEFAULT_ACTIVE_FLOW_ID) {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === 'codex') {
+    return DEFAULT_ACTIVE_FLOW_ID;
+  }
+  const fallbackValue = String(fallback || '').trim().toLowerCase();
+  return normalized || fallbackValue || DEFAULT_ACTIVE_FLOW_ID;
+}
+
+function getCurrentStepExecutionRangeFlowId(state = latestState) {
+  const selectedFlow = String(selectFlow?.value || '').trim().toLowerCase();
+  if (selectedFlow) {
+    return normalizeStepExecutionRangeFlowId(selectedFlow);
+  }
+  return normalizeStepExecutionRangeFlowId(state?.activeFlowId || state?.flowId || DEFAULT_ACTIVE_FLOW_ID);
+}
+
+function hasStepExecutionRangeShape(value) {
+  return isPlainObjectValue(value) && (
+    Object.prototype.hasOwnProperty.call(value, 'enabled')
+    || Object.prototype.hasOwnProperty.call(value, 'fromStep')
+    || Object.prototype.hasOwnProperty.call(value, 'toStep')
+    || Object.prototype.hasOwnProperty.call(value, 'from')
+    || Object.prototype.hasOwnProperty.call(value, 'to')
+  );
+}
+
+function normalizePositiveStepNumber(value, fallback = 0) {
+  const numeric = Math.floor(Number(value));
+  if (Number.isInteger(numeric) && numeric > 0) {
+    return numeric;
+  }
+  const fallbackNumber = Math.floor(Number(fallback));
+  return Number.isInteger(fallbackNumber) && fallbackNumber > 0 ? fallbackNumber : 0;
+}
+
+function normalizeStepExecutionRangeEntry(value = {}) {
+  const source = isPlainObjectValue(value) ? value : {};
+  const rawFrom = Object.prototype.hasOwnProperty.call(source, 'fromStep') ? source.fromStep : source.from;
+  const rawTo = Object.prototype.hasOwnProperty.call(source, 'toStep') ? source.toStep : source.to;
+  let fromStep = normalizePositiveStepNumber(rawFrom, 1);
+  let toStep = normalizePositiveStepNumber(rawTo, fromStep || 1);
+  if (fromStep > 0 && toStep > 0 && fromStep > toStep) {
+    [fromStep, toStep] = [toStep, fromStep];
+  }
+  const hasBounds = fromStep > 0 && toStep > 0;
+  const enabled = Object.prototype.hasOwnProperty.call(source, 'enabled')
+    ? Boolean(source.enabled)
+    : hasBounds;
+  return {
+    enabled: Boolean(enabled && hasBounds),
+    fromStep: fromStep || 1,
+    toStep: toStep || fromStep || 1,
+  };
+}
+
+function normalizeStepExecutionRangeByFlow(value = {}) {
+  const source = isPlainObjectValue(value) ? value : {};
+  const next = {};
+
+  if (hasStepExecutionRangeShape(source)) {
+    next[DEFAULT_ACTIVE_FLOW_ID] = normalizeStepExecutionRangeEntry(source);
+    return next;
+  }
+
+  for (const [rawFlowId, rawEntry] of Object.entries(source)) {
+    if (!hasStepExecutionRangeShape(rawEntry)) {
+      continue;
+    }
+    const flowId = normalizeStepExecutionRangeFlowId(rawFlowId, '');
+    if (!flowId) {
+      continue;
+    }
+    next[flowId] = normalizeStepExecutionRangeEntry(rawEntry);
+  }
+
+  return next;
+}
+
+function getStepExecutionRangeForCurrentFlow(state = latestState) {
+  const config = normalizeStepExecutionRangeByFlow(state?.stepExecutionRangeByFlow || {});
+  const flowId = getCurrentStepExecutionRangeFlowId(state);
+  return config[flowId] || { enabled: false, fromStep: 1, toStep: getLastCurrentStepId() || 1 };
+}
+
+function getLastCurrentStepId() {
+  return STEP_IDS.length ? Math.max(...STEP_IDS) : 1;
+}
+
+function isStepExecutionRangeUiAvailable(state = latestState) {
+  return getCurrentStepExecutionRangeFlowId(state) === DEFAULT_ACTIVE_FLOW_ID;
+}
+
+function clampStepExecutionRangeInputs() {
+  const maxStep = getLastCurrentStepId();
+  const fromStep = Math.min(maxStep, Math.max(1, normalizePositiveStepNumber(inputStepExecutionRangeFrom?.value, 1)));
+  const toStep = Math.min(maxStep, Math.max(1, normalizePositiveStepNumber(inputStepExecutionRangeTo?.value, maxStep)));
+  const normalizedFrom = Math.min(fromStep, toStep);
+  const normalizedTo = Math.max(fromStep, toStep);
+  if (inputStepExecutionRangeFrom) {
+    inputStepExecutionRangeFrom.max = String(maxStep);
+    inputStepExecutionRangeFrom.value = String(normalizedFrom);
+  }
+  if (inputStepExecutionRangeTo) {
+    inputStepExecutionRangeTo.max = String(maxStep);
+    inputStepExecutionRangeTo.value = String(normalizedTo);
+  }
+}
+
+function buildStepExecutionRangeByFlowPayload(existingConfig = latestState?.stepExecutionRangeByFlow || {}) {
+  const config = normalizeStepExecutionRangeByFlow(existingConfig);
+  if (!isStepExecutionRangeUiAvailable(latestState)) {
+    return config;
+  }
+  clampStepExecutionRangeInputs();
+  const flowId = getCurrentStepExecutionRangeFlowId(latestState);
+  config[flowId] = normalizeStepExecutionRangeEntry({
+    enabled: Boolean(inputStepExecutionRangeEnabled?.checked),
+    fromStep: inputStepExecutionRangeFrom?.value,
+    toStep: inputStepExecutionRangeTo?.value,
+  });
+  return config;
+}
+
+function isNodeDisabledByStepExecutionRange(nodeId, state = latestState) {
+  const range = getStepExecutionRangeForCurrentFlow(state);
+  if (!range.enabled) {
+    return false;
+  }
+  const step = getStepIdByNodeIdForCurrentMode(nodeId);
+  if (!Number.isInteger(step) || step <= 0) {
+    return false;
+  }
+  return step < range.fromStep || step > range.toStep;
+}
+
+function getEnabledNodeIdsForStepExecutionRange(state = latestState) {
+  return NODE_IDS.filter((nodeId) => !isNodeDisabledByStepExecutionRange(nodeId, state));
+}
+
+function applyStepExecutionRangeState(state = latestState) {
+  if (!rowStepExecutionRange) {
+    return;
+  }
+  const available = isStepExecutionRangeUiAvailable(state);
+  rowStepExecutionRange.style.display = available ? '' : 'none';
+  const maxStep = getLastCurrentStepId();
+  const range = getStepExecutionRangeForCurrentFlow(state);
+  if (inputStepExecutionRangeFrom) {
+    inputStepExecutionRangeFrom.min = '1';
+    inputStepExecutionRangeFrom.max = String(maxStep);
+    inputStepExecutionRangeFrom.value = String(Math.min(maxStep, Math.max(1, normalizePositiveStepNumber(range.fromStep, 1))));
+  }
+  if (inputStepExecutionRangeTo) {
+    inputStepExecutionRangeTo.min = '1';
+    inputStepExecutionRangeTo.max = String(maxStep);
+    inputStepExecutionRangeTo.value = String(Math.min(maxStep, Math.max(1, normalizePositiveStepNumber(range.toStep, maxStep))));
+  }
+  if (inputStepExecutionRangeEnabled) {
+    inputStepExecutionRangeEnabled.checked = Boolean(range.enabled);
+  }
+  const controlsDisabled = !available || isAutoRunLockedPhase() || isAutoRunScheduledPhase();
+  if (inputStepExecutionRangeEnabled) inputStepExecutionRangeEnabled.disabled = controlsDisabled;
+  if (inputStepExecutionRangeFrom) inputStepExecutionRangeFrom.disabled = controlsDisabled || !inputStepExecutionRangeEnabled?.checked;
+  if (inputStepExecutionRangeTo) inputStepExecutionRangeTo.disabled = controlsDisabled || !inputStepExecutionRangeEnabled?.checked;
+}
+
+function getDisplayNodeStatus(nodeId, status, state = latestState) {
+  return isNodeDisabledByStepExecutionRange(nodeId, state) ? 'disabled' : (status || 'pending');
+}
+
 function escapeCssValue(value = '') {
   const raw = String(value || '');
   if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') {
@@ -2292,9 +2473,33 @@ function escapeCssValue(value = '') {
   return raw.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 }
 
-function getNodeStatuses(state = latestState) {
+function normalizeStoredNodeStatus(status = '') {
+  const normalized = String(status || '').trim() || 'pending';
+  return normalized === 'disabled' ? 'pending' : normalized;
+}
+
+function getStoredNodeStatuses(state = latestState) {
   const merged = { ...NODE_DEFAULT_STATUSES, ...(state?.nodeStatuses || {}) };
-  return Object.fromEntries(NODE_IDS.map((nodeId) => [nodeId, merged[nodeId] || 'pending']));
+  return Object.fromEntries(NODE_IDS.map((nodeId) => [
+    nodeId,
+    normalizeStoredNodeStatus(merged[nodeId]),
+  ]));
+}
+
+function getNodeStatuses(state = latestState) {
+  const merged = typeof getStoredNodeStatuses === 'function'
+    ? getStoredNodeStatuses(state)
+    : Object.fromEntries(NODE_IDS.map((nodeId) => {
+      const source = { ...NODE_DEFAULT_STATUSES, ...(state?.nodeStatuses || {}) };
+      const status = String(source[nodeId] || '').trim() || 'pending';
+      return [nodeId, status === 'disabled' ? 'pending' : status];
+    }));
+  return Object.fromEntries(NODE_IDS.map((nodeId) => [
+    nodeId,
+    typeof getDisplayNodeStatus === 'function'
+      ? getDisplayNodeStatus(nodeId, merged[nodeId] || 'pending', state)
+      : (merged[nodeId] || 'pending'),
+  ]));
 }
 
 function getStepStatuses(state = latestState) {
@@ -2314,6 +2519,9 @@ function getStepStatuses(state = latestState) {
 function getFirstUnfinishedNode(state = latestState) {
   const statuses = getNodeStatuses(state);
   for (const nodeId of NODE_IDS) {
+    if (statuses[nodeId] === 'disabled') {
+      continue;
+    }
     if (!isDoneStatus(statuses[nodeId])) {
       return nodeId;
     }
@@ -2342,7 +2550,7 @@ function getRunningSteps(state = latestState) {
 
 function hasSavedProgress(state = latestState) {
   const statuses = getNodeStatuses(state);
-  return Object.values(statuses).some((status) => status !== 'pending');
+  return Object.values(statuses).some((status) => status !== 'pending' && status !== 'disabled');
 }
 
 function isContributionModeSwitchBlocked(state = latestState) {
@@ -2357,8 +2565,10 @@ function shouldOfferAutoModeChoice(state = latestState) {
 
 function syncLatestState(nextState) {
   const mergedNodeStatuses = nextState?.nodeStatuses
-    ? { ...NODE_DEFAULT_STATUSES, ...(latestState?.nodeStatuses || {}), ...nextState.nodeStatuses }
-    : getNodeStatuses(latestState);
+    ? getStoredNodeStatuses({
+      nodeStatuses: { ...NODE_DEFAULT_STATUSES, ...(latestState?.nodeStatuses || {}), ...nextState.nodeStatuses },
+    })
+    : getStoredNodeStatuses(latestState);
 
   latestState = {
     ...(latestState || {}),
@@ -4028,6 +4238,9 @@ function collectSettingsPayload() {
     step6CookieCleanupEnabled: typeof inputStep6CookieCleanupEnabled !== 'undefined' && inputStep6CookieCleanupEnabled
       ? Boolean(inputStep6CookieCleanupEnabled.checked)
       : false,
+    stepExecutionRangeByFlow: typeof buildStepExecutionRangeByFlowPayload === 'function'
+      ? buildStepExecutionRangeByFlowPayload(latestState?.stepExecutionRangeByFlow)
+      : (latestState?.stepExecutionRangeByFlow || {}),
     autoRunDelayEnabled: inputAutoDelayEnabled.checked,
     autoRunDelayMinutes: normalizeAutoDelayMinutes(inputAutoDelayMinutes.value),
     autoStepDelaySeconds: normalizeAutoStepDelaySeconds(inputAutoStepDelaySeconds.value),
@@ -9090,6 +9303,7 @@ function renderStepsList() {
   }
 
   initializeManualStepActions();
+  applyStepExecutionRangeState(latestState);
   renderStepStatuses();
   updateButtonStates();
 }
@@ -9217,6 +9431,9 @@ function applySettingsState(state) {
     applyOperationDelayState(state);
   }
   syncAutoRunState(state);
+  if (typeof applyStepExecutionRangeState === 'function') {
+    applyStepExecutionRangeState(latestState);
+  }
   renderStepStatuses(latestState);
 
   inputEmail.value = state?.email || '';
@@ -11410,7 +11627,7 @@ function updateNodeUI(nodeId, status) {
   if (!normalizedNodeId) return;
   syncLatestState({
     nodeStatuses: {
-      ...getNodeStatuses(),
+      ...getStoredNodeStatuses(),
       [normalizedNodeId]: status,
     },
   });
@@ -11433,8 +11650,10 @@ function updateStepUI(step, status) {
 }
 
 function renderSingleNodeStatus(nodeId, status) {
-  const normalizedStatus = status || 'pending';
   const normalizedNodeId = String(nodeId || '').trim();
+  const normalizedStatus = typeof getDisplayNodeStatus === 'function'
+    ? getDisplayNodeStatus(normalizedNodeId, status || 'pending', latestState)
+    : (status || 'pending');
   const selectorNodeId = escapeCssValue(normalizedNodeId);
   const statusEl = document.querySelector(`.step-status[data-node-id="${selectorNodeId}"]`);
   const row = document.querySelector(`.step-row[data-node-id="${selectorNodeId}"]`);
@@ -11480,8 +11699,10 @@ function renderStepStatuses(state = latestState) {
 
 function updateProgressCounter() {
   if (typeof getNodeStatuses === 'function' && typeof NODE_IDS !== 'undefined') {
-    const completed = Object.values(getNodeStatuses()).filter(isDoneStatus).length;
-    stepsProgress.textContent = `${completed} / ${NODE_IDS.length}`;
+    const statuses = getNodeStatuses();
+    const enabledNodeIds = NODE_IDS.filter((nodeId) => statuses[nodeId] !== 'disabled');
+    const completed = enabledNodeIds.filter((nodeId) => isDoneStatus(statuses[nodeId])).length;
+    stepsProgress.textContent = `${completed} / ${enabledNodeIds.length || NODE_IDS.length}`;
     return;
   }
   const completed = Object.values(getStepStatuses()).filter(isDoneStatus).length;
@@ -11493,6 +11714,7 @@ function updateButtonStates() {
   const anyRunning = Object.values(statuses).some(s => s === 'running');
   const autoLocked = isAutoRunLockedPhase();
   const autoScheduled = isAutoRunScheduledPhase();
+  const enabledNodeIds = getEnabledNodeIdsForStepExecutionRange(latestState);
   const icloudTargetMailboxTypeValue = typeof selectIcloudTargetMailboxType !== 'undefined'
     ? selectIcloudTargetMailboxType?.value
     : latestState?.icloudTargetMailboxType;
@@ -11501,16 +11723,18 @@ function updateButtonStates() {
     const step = getStepIdByNodeIdForCurrentMode(nodeId);
     const btn = document.querySelector(`.step-btn[data-node-id="${escapeCssValue(nodeId)}"]`);
     if (!btn) continue;
+    const currentStatus = statuses[nodeId];
 
-    if (anyRunning || autoLocked || autoScheduled) {
+    if (currentStatus === 'disabled') {
       btn.disabled = true;
-    } else if (NODE_IDS.indexOf(nodeId) === 0) {
+    } else if (anyRunning || autoLocked || autoScheduled) {
+      btn.disabled = true;
+    } else if (enabledNodeIds.indexOf(nodeId) === 0) {
       btn.disabled = false;
     } else {
-      const currentIndex = NODE_IDS.indexOf(nodeId);
-      const prevNodeId = currentIndex > 0 ? NODE_IDS[currentIndex - 1] : null;
+      const currentIndex = enabledNodeIds.indexOf(nodeId);
+      const prevNodeId = currentIndex > 0 ? enabledNodeIds[currentIndex - 1] : null;
       const prevStatus = prevNodeId === null ? 'completed' : statuses[prevNodeId];
-      const currentStatus = statuses[nodeId];
       btn.disabled = !(isDoneStatus(prevStatus) || currentStatus === 'failed' || isDoneStatus(currentStatus) || currentStatus === 'stopped');
     }
   }
@@ -11519,11 +11743,11 @@ function updateButtonStates() {
     const step = Number(btn.dataset.step);
     const nodeId = String(btn.dataset.nodeId || getNodeIdByStepForCurrentMode(step) || '').trim();
     const currentStatus = statuses[nodeId];
-    const currentIndex = NODE_IDS.indexOf(nodeId);
-    const prevNodeId = currentIndex > 0 ? NODE_IDS[currentIndex - 1] : null;
+    const currentIndex = enabledNodeIds.indexOf(nodeId);
+    const prevNodeId = currentIndex > 0 ? enabledNodeIds[currentIndex - 1] : null;
     const prevStatus = prevNodeId === null ? 'completed' : statuses[prevNodeId];
 
-    if (!SKIPPABLE_NODES.has(nodeId) || anyRunning || autoLocked || autoScheduled || currentStatus === 'running' || isDoneStatus(currentStatus)) {
+    if (!SKIPPABLE_NODES.has(nodeId) || currentStatus === 'disabled' || anyRunning || autoLocked || autoScheduled || currentStatus === 'running' || isDoneStatus(currentStatus)) {
       btn.style.display = 'none';
       btn.disabled = true;
       btn.title = '当前不可跳过';
@@ -11564,6 +11788,7 @@ function updateButtonStates() {
   }
   if (checkboxAutoDeleteIcloud) checkboxAutoDeleteIcloud.disabled = disableIcloudControls;
   if (btnContributionMode) btnContributionMode.disabled = isContributionButtonLocked();
+  applyStepExecutionRangeState(latestState);
   updateStopButtonState(anyRunning || autoScheduled || isAutoRunPausedPhase() || autoLocked);
   renderContributionMode();
 }
@@ -11645,9 +11870,13 @@ function updateStatusDisplay(state) {
     .filter(([, s]) => isDoneStatus(s))
     .map(([nodeId]) => nodeId)
     .sort((left, right) => NODE_IDS.indexOf(right) - NODE_IDS.indexOf(left))[0];
+  const enabledNodeIds = getEnabledNodeIdsForStepExecutionRange(state);
+  const lastEnabledNodeId = enabledNodeIds[enabledNodeIds.length - 1] || NODE_IDS[NODE_IDS.length - 1];
 
-  if (lastCompleted === NODE_IDS[NODE_IDS.length - 1]) {
-    displayStatus.textContent = (nodeStatuses[lastCompleted] === 'manual_completed' || nodeStatuses[lastCompleted] === 'skipped') ? '全部节点已跳过/完成' : '全部节点已完成';
+  if (lastCompleted === lastEnabledNodeId) {
+    const range = getStepExecutionRangeForCurrentFlow(state);
+    const doneText = range.enabled ? '执行范围已完成' : '全部节点已完成';
+    displayStatus.textContent = (nodeStatuses[lastCompleted] === 'manual_completed' || nodeStatuses[lastCompleted] === 'skipped') ? `${doneText}/跳过` : doneText;
     statusBar.classList.add('completed');
   } else if (lastCompleted) {
     displayStatus.textContent = (nodeStatuses[lastCompleted] === 'manual_completed' || nodeStatuses[lastCompleted] === 'skipped')
@@ -14107,6 +14336,37 @@ inputStep6CookieCleanupEnabled?.addEventListener('change', () => {
   saveSettings({ silent: true }).catch(() => { });
 });
 
+inputStepExecutionRangeEnabled?.addEventListener('change', () => {
+  const stepExecutionRangeByFlow = buildStepExecutionRangeByFlowPayload(latestState?.stepExecutionRangeByFlow);
+  syncLatestState({ stepExecutionRangeByFlow });
+  applyStepExecutionRangeState(latestState);
+  renderStepStatuses(latestState);
+  updateButtonStates();
+  markSettingsDirty(true);
+  saveSettings({ silent: true }).catch(() => { });
+});
+
+selectFlow?.addEventListener('change', () => {
+  applyStepExecutionRangeState(latestState);
+  renderStepStatuses(latestState);
+  updateButtonStates();
+});
+
+[inputStepExecutionRangeFrom, inputStepExecutionRangeTo].forEach((input) => {
+  input?.addEventListener('input', () => {
+    const stepExecutionRangeByFlow = buildStepExecutionRangeByFlowPayload(latestState?.stepExecutionRangeByFlow);
+    syncLatestState({ stepExecutionRangeByFlow });
+    markSettingsDirty(true);
+    renderStepStatuses(latestState);
+    updateButtonStates();
+    scheduleSettingsAutoSave();
+  });
+  input?.addEventListener('blur', () => {
+    clampStepExecutionRangeInputs();
+    saveSettings({ silent: true }).catch(() => { });
+  });
+});
+
 inputAutoDelayMinutes.addEventListener('input', () => {
   markSettingsDirty(true);
   scheduleSettingsAutoSave();
@@ -15343,6 +15603,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         && inputStep6CookieCleanupEnabled
       ) {
         inputStep6CookieCleanupEnabled.checked = Boolean(message.payload.step6CookieCleanupEnabled);
+      }
+      if (message.payload.stepExecutionRangeByFlow !== undefined) {
+        applyStepExecutionRangeState({
+          ...(latestState || {}),
+          stepExecutionRangeByFlow: message.payload.stepExecutionRangeByFlow,
+        });
+        renderStepStatuses(latestState);
+        updateButtonStates();
       }
       if (message.payload.autoRunDelayMinutes !== undefined) {
         inputAutoDelayMinutes.value = String(normalizeAutoDelayMinutes(message.payload.autoRunDelayMinutes));
