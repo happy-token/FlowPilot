@@ -64,6 +64,16 @@
         command: 'grok-extract-sso-cookie',
         flowId: 'grok',
       },
+      {
+        id: 6,
+        order: 60,
+        key: 'grok-upload-sso-to-webchat2api',
+        title: '上传 SSO 到 webchat2api',
+        sourceId: 'grok-webchat2api',
+        driverId: 'flows/grok/background/publisher-webchat2api',
+        command: 'grok-upload-sso-to-webchat2api',
+        flowId: 'grok',
+      },
     ],
   });
 

@@ -153,7 +153,7 @@ test('settings schema can project canonical state into a read view without legac
   assert.deepEqual(view.stepExecutionRangeByFlow.grok, {
     enabled: false,
     fromStep: 1,
-    toStep: 5,
+    toStep: 6,
   });
 });
 

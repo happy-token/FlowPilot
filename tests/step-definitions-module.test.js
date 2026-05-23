@@ -220,6 +220,7 @@ test('step definitions module exposes ordered normal and Plus step metadata', ()
       'grok-submit-verification-code',
       'grok-submit-profile',
       'grok-extract-sso-cookie',
+      'grok-upload-sso-to-webchat2api',
     ]
   );
   assert.equal(grokSteps.every((step) => step.flowId === 'grok'), true);
@@ -228,10 +229,10 @@ test('step definitions module exposes ordered normal and Plus step metadata', ()
   assert.equal(grokSteps[2].mailRuleId, 'grok-submit-verification-code');
   assert.deepStrictEqual(
     grokSteps.map((step) => step.title),
-    ['打开 Grok 注册页', '获取邮箱并继续', '获取验证码并继续', '填写资料并继续', '提取 SSO Cookie']
+    ['打开 Grok 注册页', '获取邮箱并继续', '获取验证码并继续', '填写资料并继续', '提取 SSO Cookie', '上传 SSO 到 webchat2api']
   );
-  assert.deepStrictEqual(api.getStepIds({ activeFlowId: 'grok' }), [1, 2, 3, 4, 5]);
-  assert.equal(api.getLastStepId({ activeFlowId: 'grok' }), 5);
+  assert.deepStrictEqual(api.getStepIds({ activeFlowId: 'grok' }), [1, 2, 3, 4, 5, 6]);
+  assert.equal(api.getLastStepId({ activeFlowId: 'grok' }), 6);
   assert.deepStrictEqual(
     api.getNodes({ activeFlowId: 'grok' }).map((node) => node.next),
     [
@@ -239,6 +240,7 @@ test('step definitions module exposes ordered normal and Plus step metadata', ()
       ['grok-submit-verification-code'],
       ['grok-submit-profile'],
       ['grok-extract-sso-cookie'],
+      ['grok-upload-sso-to-webchat2api'],
       [],
     ]
   );

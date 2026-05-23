@@ -19,12 +19,14 @@ test('background imports node registry and wires the rebuilt Kiro executors', ()
   assert.match(source, /flows\/kiro\/background\/publisher-kiro-rs\.js/);
   assert.match(source, /flows\/grok\/background\/state\.js/);
   assert.match(source, /flows\/grok\/background\/register-runner\.js/);
+  assert.match(source, /flows\/grok\/background\/publisher-webchat2api\.js/);
   assert.doesNotMatch(source, /background\/steps\/kiro-device-auth\.js/);
 
   assert.match(source, /const kiroRegisterRunner = self\.MultiPageBackgroundKiroRegisterRunner\?\.createKiroRegisterRunner\(/);
   assert.match(source, /const kiroDesktopAuthorizeRunner = self\.MultiPageBackgroundKiroDesktopAuthorizeRunner\?\.createKiroDesktopAuthorizeRunner\(/);
   assert.match(source, /const kiroPublisher = self\.MultiPageBackgroundKiroPublisherKiroRs\?\.createKiroRsPublisher\(/);
   assert.match(source, /const grokRegisterRunner = self\.MultiPageBackgroundGrokRegisterRunner\?\.createGrokRegisterRunner\(/);
+  assert.match(source, /const grokWebchat2ApiPublisher = self\.MultiPageBackgroundGrokPublisherWebchat2Api\?\.createGrokWebchat2ApiPublisher\(/);
 
   assert.match(source, /'kiro-open-register-page': \(state\) => kiroRegisterRunner\.executeKiroOpenRegisterPage\(state\)/);
   assert.match(source, /'kiro-submit-email': \(state\) => kiroRegisterRunner\.executeKiroSubmitEmail\(state\)/);
@@ -40,6 +42,7 @@ test('background imports node registry and wires the rebuilt Kiro executors', ()
   assert.match(source, /'grok-submit-verification-code': \(state\) => grokRegisterRunner\.executeGrokSubmitVerificationCode\(state\)/);
   assert.match(source, /'grok-submit-profile': \(state\) => grokRegisterRunner\.executeGrokSubmitProfile\(state\)/);
   assert.match(source, /'grok-extract-sso-cookie': \(state\) => grokRegisterRunner\.executeGrokExtractSsoCookie\(state\)/);
+  assert.match(source, /'grok-upload-sso-to-webchat2api': \(state\) => grokWebchat2ApiPublisher\.executeGrokUploadSsoToWebchat2Api\(state\)/);
 
   assert.match(
     source,
@@ -47,7 +50,7 @@ test('background imports node registry and wires the rebuilt Kiro executors', ()
   );
   assert.match(
     source,
-    /'grok-open-signup-page',[\s\S]*'grok-submit-email',[\s\S]*'grok-submit-verification-code',[\s\S]*'grok-submit-profile',[\s\S]*'grok-extract-sso-cookie'/
+    /'grok-open-signup-page',[\s\S]*'grok-submit-email',[\s\S]*'grok-submit-verification-code',[\s\S]*'grok-submit-profile',[\s\S]*'grok-extract-sso-cookie',[\s\S]*'grok-upload-sso-to-webchat2api'/
   );
 });
 

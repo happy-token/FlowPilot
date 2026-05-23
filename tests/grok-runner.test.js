@@ -110,7 +110,7 @@ test('grok verification runner polls by flow node and submits normalized code', 
   assert.equal(getGrokRuntime(completedPayload).register.status, 'verified');
 });
 
-test('grok SSO extraction accumulates unique cookies without logging the secret value', async () => {
+test('grok SSO extraction stores only the current cookie without logging the secret value', async () => {
   const api = loadGrokRunnerApi();
   const logs = [];
   let completedPayload = null;
@@ -118,7 +118,7 @@ test('grok SSO extraction accumulates unique cookies without logging the secret 
   let currentState = {
     activeFlowId: 'grok',
     grokRegisterTabId: 202,
-    grokSsoCookies: ['existing-cookie', 'new-cookie'],
+    grokSsoCookies: ['old-cookie'],
     runtimeState: {
       flowState: {
         grok: {
@@ -126,7 +126,13 @@ test('grok SSO extraction accumulates unique cookies without logging the secret 
             registerTabId: 202,
           },
           sso: {
-            cookies: ['existing-cookie', 'new-cookie'],
+            cookies: ['old-cookie'],
+          },
+          upload: {
+            status: 'uploaded',
+            uploadedAt: 1000,
+            message: 'old upload',
+            targetUrl: 'https://old.example.com/api/remote-account/inject',
           },
         },
       },
@@ -169,9 +175,12 @@ test('grok SSO extraction accumulates unique cookies without logging the secret 
   await runner.executeGrokExtractSsoCookie({ nodeId: 'grok-extract-sso-cookie', ...currentState });
 
   assert.equal(completedPayload.grokSsoCookie, 'new-cookie');
-  assert.deepEqual(completedPayload.grokSsoCookies, ['existing-cookie', 'new-cookie']);
+  assert.deepEqual(completedPayload.grokSsoCookies, ['new-cookie']);
+  assert.equal(completedPayload.grokWebchat2ApiUploadStatus, '');
   assert.equal(getGrokRuntime(completedPayload).sso.currentCookie, 'new-cookie');
-  assert.deepEqual(getGrokRuntime(completedPayload).sso.cookies, ['existing-cookie', 'new-cookie']);
+  assert.deepEqual(getGrokRuntime(completedPayload).sso.cookies, ['new-cookie']);
+  assert.equal(getGrokRuntime(completedPayload).upload.status, '');
+  assert.equal(getGrokRuntime(completedPayload).upload.targetUrl, '');
   assert.equal(markUsedPayload.grokSsoCookie, 'new-cookie');
   assert.equal(logs.some(({ message }) => message.includes('new-cookie')), false);
 });

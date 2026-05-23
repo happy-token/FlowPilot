@@ -44,6 +44,7 @@ importScripts(
   'flows/kiro/background/desktop-client.js',
   'flows/kiro/background/desktop-authorize-runner.js',
   'flows/kiro/background/publisher-kiro-rs.js',
+  'flows/grok/background/publisher-webchat2api.js',
   'background/generated-email-helpers.js',
   'background/signup-flow-helpers.js',
   'background/mail-rule-registry.js',
@@ -1264,6 +1265,8 @@ const PERSISTED_SETTING_DEFAULTS = {
   activeFlowId: DEFAULT_ACTIVE_FLOW_ID,
   kiroRsUrl: String(self.MultiPageFlowRegistry?.DEFAULT_KIRO_RS_URL || '').trim(),
   kiroRsKey: '',
+  grokWebchat2ApiUrl: '',
+  grokWebchat2ApiAdminKey: '',
   vpsUrl: '',
   vpsPassword: '',
   localCpaStep9Mode: DEFAULT_LOCAL_CPA_STEP9_MODE,
@@ -1481,6 +1484,8 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'ipProxyMode',
   'kiroRsUrl',
   'kiroRsKey',
+  'grokWebchat2ApiUrl',
+  'grokWebchat2ApiAdminKey',
   'stepExecutionRangeByFlow',
 ]);
 const SETTINGS_SCHEMA_VIEW_KEY_SET = new Set(SETTINGS_SCHEMA_VIEW_KEYS);
@@ -3158,8 +3163,10 @@ function normalizePersistentSettingValue(key, value) {
       }
       return String(value || '').trim().toLowerCase() === 'kiro' ? 'kiro' : DEFAULT_ACTIVE_FLOW_ID;
     case 'kiroRsUrl':
+    case 'grokWebchat2ApiUrl':
       return String(value || '').trim();
     case 'kiroRsKey':
+    case 'grokWebchat2ApiAdminKey':
       return String(value || '').trim();
     case 'vpsUrl':
       return String(value || '').trim();
@@ -3835,6 +3842,8 @@ function buildSettingsStatePatchFromFlatUpdates(updates = {}) {
   assignIfUpdated('ipProxyMode', ['services', 'proxy', 'mode']);
   assignIfUpdated('kiroRsUrl', ['flows', 'kiro', 'targets', 'kiro-rs', 'baseUrl']);
   assignIfUpdated('kiroRsKey', ['flows', 'kiro', 'targets', 'kiro-rs', 'apiKey']);
+  assignIfUpdated('grokWebchat2ApiUrl', ['flows', 'grok', 'targets', 'webchat2api', 'baseUrl']);
+  assignIfUpdated('grokWebchat2ApiAdminKey', ['flows', 'grok', 'targets', 'webchat2api', 'apiKey']);
 
   if (hasUpdate('stepExecutionRangeByFlow') && isPlainObjectValue(updates.stepExecutionRangeByFlow)) {
     Object.entries(updates.stepExecutionRangeByFlow).forEach(([rawFlowId, range]) => {
@@ -4367,11 +4376,21 @@ async function clearGrokSsoCookies() {
         cookies: [],
         extractedAt: 0,
       },
+      upload: {
+        status: '',
+        uploadedAt: 0,
+        message: '',
+        targetUrl: '',
+      },
     })
     : {
       grokSsoCookie: '',
       grokSsoCookies: [],
       grokSsoExtractedAt: 0,
+      grokWebchat2ApiUploadStatus: '',
+      grokWebchat2ApiUploadedAt: 0,
+      grokWebchat2ApiUploadMessage: '',
+      grokWebchat2ApiTargetUrl: '',
     };
   await setState(patch);
   const nextState = await getState();
@@ -10936,6 +10955,7 @@ const AUTO_RUN_BACKGROUND_COMPLETED_STEP_KEYS = new Set([
   'grok-submit-verification-code',
   'grok-submit-profile',
   'grok-extract-sso-cookie',
+  'grok-upload-sso-to-webchat2api',
 ]);
 const STEP_COMPLETION_SIGNAL_STEP_KEYS = new Set([
   'fill-password',
@@ -14016,6 +14036,13 @@ const kiroPublisher = self.MultiPageBackgroundKiroPublisherKiroRs?.createKiroRsP
   maybeSubmitFlowContribution,
   setState,
 });
+const grokWebchat2ApiPublisher = self.MultiPageBackgroundGrokPublisherWebchat2Api?.createGrokWebchat2ApiPublisher({
+  addLog,
+  completeNodeFromBackground,
+  fetchImpl: typeof fetch === 'function' ? fetch.bind(globalThis) : null,
+  getState,
+  setState,
+});
 const step10Executor = self.MultiPageBackgroundStep10?.createStep10Executor({
   addLog,
   chrome,
@@ -14115,6 +14142,7 @@ const stepExecutorsByKey = {
   'grok-submit-verification-code': (state) => grokRegisterRunner.executeGrokSubmitVerificationCode(state),
   'grok-submit-profile': (state) => grokRegisterRunner.executeGrokSubmitProfile(state),
   'grok-extract-sso-cookie': (state) => grokRegisterRunner.executeGrokExtractSsoCookie(state),
+  'grok-upload-sso-to-webchat2api': (state) => grokWebchat2ApiPublisher.executeGrokUploadSsoToWebchat2Api(state),
 };
 const messageRouter = self.MultiPageBackgroundMessageRouter?.createMessageRouter({
   addLog,

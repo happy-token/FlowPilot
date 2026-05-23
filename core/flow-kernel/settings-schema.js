@@ -295,6 +295,13 @@
           apiKey: String(targetState.apiKey ?? ''),
         };
       }
+      if (flowId === 'grok' && targetId === 'webchat2api') {
+        return {
+          ...targetState,
+          baseUrl: String(targetState.baseUrl ?? '').trim(),
+          apiKey: String(targetState.apiKey ?? ''),
+        };
+      }
       return targetState;
     }
 
@@ -601,6 +608,7 @@
       };
       const openaiState = normalizedState.flows.openai || buildDefaultFlowSettings('openai');
       const kiroState = normalizedState.flows.kiro || buildDefaultFlowSettings('kiro');
+      const grokState = normalizedState.flows.grok || buildDefaultFlowSettings('grok');
       next.activeFlowId = normalizedState.activeFlowId;
       next.targetId = getSelectedTargetId(normalizedState, normalizedState.activeFlowId);
       next.vpsUrl = openaiState.targets.cpa?.vpsUrl || '';
@@ -631,6 +639,8 @@
       next.ipProxyMode = normalizedState.services.proxy.mode;
       next.kiroRsUrl = kiroState.targets['kiro-rs']?.baseUrl || '';
       next.kiroRsKey = kiroState.targets['kiro-rs']?.apiKey || '';
+      next.grokWebchat2ApiUrl = grokState.targets.webchat2api?.baseUrl || '';
+      next.grokWebchat2ApiAdminKey = grokState.targets.webchat2api?.apiKey || '';
       next.stepExecutionRangeByFlow = buildStepExecutionRangeByFlow(normalizedState);
       next.settingsSchemaVersion = normalizedState.schemaVersion;
       next.settingsState = cloneValue(normalizedState);

@@ -43,6 +43,10 @@
         groups: [
           'grok-target-webchat2api',
         ],
+        defaultState: {
+          baseUrl: '',
+          apiKey: '',
+        },
       },
     },
     publicationTargets: {},
@@ -106,14 +110,26 @@
           'grok-extract-sso-cookie',
         ],
       },
+      'flows/grok/background/publisher-webchat2api': {
+        sourceId: 'grok-webchat2api',
+        commands: [
+          'grok-upload-sso-to-webchat2api',
+        ],
+      },
     },
     defaultTargetId: 'webchat2api',
     settingsDefaults: {
+      targets: {
+        webchat2api: {
+          baseUrl: '',
+          apiKey: '',
+        },
+      },
       autoRun: {
         stepExecutionRange: {
           enabled: false,
           fromStep: 1,
-          toStep: 5,
+          toStep: 6,
         },
       },
     },
@@ -122,6 +138,8 @@
         id: 'grok-target-webchat2api',
         label: 'webchat2api',
         rowIds: [
+          'row-grok-webchat2api-url',
+          'row-grok-webchat2api-key',
           'row-grok-sso-settings',
         ],
       },
@@ -131,6 +149,7 @@
         rowIds: [
           'row-grok-register-status',
           'row-grok-sso-status',
+          'row-grok-webchat2api-upload-status',
         ],
       },
     },

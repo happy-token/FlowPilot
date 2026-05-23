@@ -49,15 +49,17 @@ test('sidepanel html exposes flow selector and kiro source fields', () => {
     'id="row-kiro-upload-status"',
     'id="row-grok-register-status"',
     'id="row-grok-sso-status"',
+    'id="row-grok-webchat2api-upload-status"',
+    'id="display-grok-webchat2api-upload-status"',
     'id="row-grok-sso-settings"',
     'id="btn-copy-grok-sso"',
-    'id="btn-export-grok-sso"',
     'id="btn-clear-grok-sso"',
     '<script src="../flows/grok/index.js"></script>',
     '<script src="../flows/grok/workflow.js"></script>',
   ].forEach((snippet) => {
     assert.match(sidepanelHtml, new RegExp(snippet.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   });
+  assert.doesNotMatch(sidepanelHtml, /id="btn-export-grok-sso"/);
   assert.ok(
     sidepanelHtml.indexOf('<script src="../flows/kiro/workflow.js"></script>')
       < sidepanelHtml.indexOf('<script src="../flows/grok/index.js"></script>')
@@ -86,6 +88,7 @@ test('sidepanel renders Grok SSO status from canonical runtime state', () => {
     extractFunction(sidepanelSource, 'getGrokRuntimeState'),
     extractFunction(sidepanelSource, 'normalizeGrokSsoCookies'),
     extractFunction(sidepanelSource, 'getGrokRegisterStatusLabel'),
+    extractFunction(sidepanelSource, 'getGrokWebchat2ApiUploadStatusLabel'),
     extractFunction(sidepanelSource, 'renderGrokRuntimeState'),
   ].join('\n');
 
@@ -94,17 +97,17 @@ let latestState = {};
 const displayGrokRegisterStatus = { textContent: '' };
 const displayGrokSsoStatus = { textContent: '' };
 const displayGrokSsoCookie = { textContent: '', title: '' };
+const displayGrokWebchat2ApiUploadStatus = { textContent: '', title: '' };
 const buttons = [];
 const btnCopyGrokSso = { disabled: false };
-const btnExportGrokSso = { disabled: false };
 const btnClearGrokSso = { disabled: false };
 ${bundle}
 return {
   displayGrokRegisterStatus,
   displayGrokSsoStatus,
   displayGrokSsoCookie,
+  displayGrokWebchat2ApiUploadStatus,
   btnCopyGrokSso,
-  btnExportGrokSso,
   btnClearGrokSso,
   renderGrokRuntimeState,
 };
@@ -120,6 +123,12 @@ return {
             cookies: ['1234567890abcdef', 'second-cookie'],
             extractedAt: 0,
           },
+          upload: {
+            status: 'uploaded',
+            uploadedAt: 0,
+            message: '上传成功',
+            targetUrl: 'https://remote.example.com/api/remote-account/inject',
+          },
         },
       },
     },
@@ -128,8 +137,9 @@ return {
   assert.equal(api.displayGrokRegisterStatus.textContent, '已完成');
   assert.match(api.displayGrokSsoStatus.textContent, /^已提取 2 条/);
   assert.equal(api.displayGrokSsoCookie.textContent, '12345678...abcdef');
+  assert.equal(api.displayGrokWebchat2ApiUploadStatus.textContent, '已上传：上传成功');
+  assert.equal(api.displayGrokWebchat2ApiUploadStatus.title, 'https://remote.example.com/api/remote-account/inject');
   assert.equal(api.btnCopyGrokSso.disabled, false);
-  assert.equal(api.btnExportGrokSso.disabled, false);
   assert.equal(api.btnClearGrokSso.disabled, false);
 });
 

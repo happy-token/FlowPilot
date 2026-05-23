@@ -613,22 +613,17 @@
           throw new Error('未找到 x.ai/grok sso Cookie。');
         }
 
-        const latestState = await getState();
-        const existingSsoCookies = Array.isArray(latestState?.grokSsoCookies)
-          ? latestState.grokSsoCookies
-            .map((entry) => cleanString(entry))
-            .filter(Boolean)
-          : [];
-        const nextSsoCookies = existingSsoCookies.includes(ssoCookie)
-          ? existingSsoCookies
-          : [...existingSsoCookies, ssoCookie];
         const completedAt = Date.now();
         const completionPatch = {
           grokSsoCookie: ssoCookie,
-          grokSsoCookies: nextSsoCookies,
+          grokSsoCookies: [ssoCookie],
           grokSsoExtractedAt: completedAt,
           grokCompletedAt: completedAt,
           grokRegisterStatus: 'completed',
+          grokWebchat2ApiUploadStatus: '',
+          grokWebchat2ApiUploadedAt: 0,
+          grokWebchat2ApiUploadMessage: '',
+          grokWebchat2ApiTargetUrl: '',
           ...buildGrokRuntimePatch({
             register: {
               status: 'completed',
@@ -636,8 +631,14 @@
             },
             sso: {
               currentCookie: ssoCookie,
-              cookies: nextSsoCookies,
+              cookies: [ssoCookie],
               extractedAt: completedAt,
+            },
+            upload: {
+              status: '',
+              uploadedAt: 0,
+              message: '',
+              targetUrl: '',
             },
             session: {
               lastError: '',

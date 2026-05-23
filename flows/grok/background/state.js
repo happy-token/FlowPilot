@@ -39,6 +39,26 @@
     return String(value ?? '').trim();
   }
 
+  function assignCleanString(target = {}, key = '', value = '') {
+    const normalized = cleanString(value);
+    if (normalized) {
+      target[key] = normalized;
+    }
+  }
+
+  function assignPositiveInteger(target = {}, key = '', value) {
+    const numeric = Math.floor(Number(value));
+    if (Number.isInteger(numeric) && numeric > 0) {
+      target[key] = numeric;
+    }
+  }
+
+  function assignNonEmptyArray(target = {}, key = '', value) {
+    if (Array.isArray(value) && value.length) {
+      target[key] = value;
+    }
+  }
+
   function normalizeInteger(value, fallback = 0) {
     const numeric = Math.floor(Number(value));
     return Number.isInteger(numeric) ? numeric : fallback;
@@ -87,6 +107,12 @@
         cookies: [],
         extractedAt: 0,
       },
+      upload: {
+        status: '',
+        uploadedAt: 0,
+        message: '',
+        targetUrl: '',
+      },
     };
   }
 
@@ -114,6 +140,12 @@
         currentCookie: cleanString(merged.sso?.currentCookie || merged.ssoCookie),
         cookies: normalizeSsoCookies(merged.sso?.cookies || merged.ssoCookies),
         extractedAt: Math.max(0, normalizeInteger(merged.sso?.extractedAt)),
+      },
+      upload: {
+        status: cleanString(merged.upload?.status),
+        uploadedAt: Math.max(0, normalizeInteger(merged.upload?.uploadedAt)),
+        message: cleanString(merged.upload?.message),
+        targetUrl: cleanString(merged.upload?.targetUrl),
       },
     };
   }
@@ -152,6 +184,10 @@
       grokSsoCookie: normalizedRuntimeState.sso.currentCookie,
       grokSsoCookies: normalizedRuntimeState.sso.cookies,
       grokSsoExtractedAt: normalizedRuntimeState.sso.extractedAt,
+      grokWebchat2ApiUploadStatus: normalizedRuntimeState.upload.status,
+      grokWebchat2ApiUploadedAt: normalizedRuntimeState.upload.uploadedAt,
+      grokWebchat2ApiUploadMessage: normalizedRuntimeState.upload.message,
+      grokWebchat2ApiTargetUrl: normalizedRuntimeState.upload.targetUrl,
     };
   }
 
@@ -163,27 +199,29 @@
       ? state.flowState.grok
       : {};
     const flatRuntime = {
-      session: {
-        registerTabId: state.grokRegisterTabId,
-        pageState: state.grokPageState,
-        pageUrl: state.grokPageUrl || state.grokPostVerificationUrl,
-      },
-      register: {
-        email: state.grokEmail || state.email,
-        firstName: state.grokFirstName,
-        lastName: state.grokLastName,
-        password: state.grokPassword,
-        verificationRequestedAt: state.grokVerificationRequestedAt,
-        verificationCode: state.grokVerificationCode,
-        status: state.grokRegisterStatus,
-        completedAt: state.grokCompletedAt,
-      },
-      sso: {
-        currentCookie: state.grokSsoCookie,
-        cookies: state.grokSsoCookies,
-        extractedAt: state.grokSsoExtractedAt || state.grokCompletedAt,
-      },
+      session: {},
+      register: {},
+      sso: {},
+      upload: {},
     };
+    assignPositiveInteger(flatRuntime.session, 'registerTabId', state.grokRegisterTabId);
+    assignCleanString(flatRuntime.session, 'pageState', state.grokPageState);
+    assignCleanString(flatRuntime.session, 'pageUrl', state.grokPageUrl || state.grokPostVerificationUrl);
+    assignCleanString(flatRuntime.register, 'email', state.grokEmail || state.email);
+    assignCleanString(flatRuntime.register, 'firstName', state.grokFirstName);
+    assignCleanString(flatRuntime.register, 'lastName', state.grokLastName);
+    assignCleanString(flatRuntime.register, 'password', state.grokPassword);
+    assignPositiveInteger(flatRuntime.register, 'verificationRequestedAt', state.grokVerificationRequestedAt);
+    assignCleanString(flatRuntime.register, 'verificationCode', state.grokVerificationCode);
+    assignCleanString(flatRuntime.register, 'status', state.grokRegisterStatus);
+    assignPositiveInteger(flatRuntime.register, 'completedAt', state.grokCompletedAt);
+    assignCleanString(flatRuntime.sso, 'currentCookie', state.grokSsoCookie);
+    assignNonEmptyArray(flatRuntime.sso, 'cookies', state.grokSsoCookies);
+    assignPositiveInteger(flatRuntime.sso, 'extractedAt', state.grokSsoExtractedAt || state.grokCompletedAt);
+    assignCleanString(flatRuntime.upload, 'status', state.grokWebchat2ApiUploadStatus);
+    assignPositiveInteger(flatRuntime.upload, 'uploadedAt', state.grokWebchat2ApiUploadedAt);
+    assignCleanString(flatRuntime.upload, 'message', state.grokWebchat2ApiUploadMessage);
+    assignCleanString(flatRuntime.upload, 'targetUrl', state.grokWebchat2ApiTargetUrl);
     return normalizeRuntimeState(deepMerge(deepMerge(runtimeFlowState.grok || {}, legacyFlowState), flatRuntime));
   }
 
@@ -346,6 +384,18 @@
         extractedAt: payload.grokSsoExtractedAt || payload.grokCompletedAt || 0,
       };
     }
+    if (Object.prototype.hasOwnProperty.call(payload, 'grokWebchat2ApiUploadStatus')) {
+      patch.upload = { ...(patch.upload || {}), status: payload.grokWebchat2ApiUploadStatus };
+    }
+    if (Object.prototype.hasOwnProperty.call(payload, 'grokWebchat2ApiUploadedAt')) {
+      patch.upload = { ...(patch.upload || {}), uploadedAt: payload.grokWebchat2ApiUploadedAt };
+    }
+    if (Object.prototype.hasOwnProperty.call(payload, 'grokWebchat2ApiUploadMessage')) {
+      patch.upload = { ...(patch.upload || {}), message: payload.grokWebchat2ApiUploadMessage };
+    }
+    if (Object.prototype.hasOwnProperty.call(payload, 'grokWebchat2ApiTargetUrl')) {
+      patch.upload = { ...(patch.upload || {}), targetUrl: payload.grokWebchat2ApiTargetUrl };
+    }
     if (!Object.keys(patch).length) {
       return {};
     }
@@ -353,10 +403,7 @@
   }
 
   function buildFreshKeepState(currentState = {}) {
-    const currentRuntimeState = ensureRuntimeState(currentState);
-    const nextRuntimeState = buildDefaultRuntimeState();
-    nextRuntimeState.sso = currentRuntimeState.sso || buildDefaultRuntimeState().sso;
-    return buildRuntimeStatePatch(currentState, nextRuntimeState);
+    return buildRuntimeStatePatch(currentState, buildDefaultRuntimeState());
   }
 
   return {

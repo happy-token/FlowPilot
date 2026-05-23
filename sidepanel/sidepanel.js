@@ -186,6 +186,10 @@ const inputKiroRsKey = document.getElementById('input-kiro-rs-key');
 const btnTestKiroRs = document.getElementById('btn-test-kiro-rs');
 const rowKiroRsTestStatus = document.getElementById('row-kiro-rs-test-status');
 const displayKiroRsTestStatus = document.getElementById('display-kiro-rs-test-status');
+const rowGrokWebchat2ApiUrl = document.getElementById('row-grok-webchat2api-url');
+const inputGrokWebchat2ApiUrl = document.getElementById('input-grok-webchat2api-url');
+const rowGrokWebchat2ApiKey = document.getElementById('row-grok-webchat2api-key');
+const inputGrokWebchat2ApiKey = document.getElementById('input-grok-webchat2api-key');
 const rowKiroWebStatus = document.getElementById('row-kiro-web-status');
 const displayKiroWebStatus = document.getElementById('display-kiro-web-status');
 const rowKiroLoginUrl = document.getElementById('row-kiro-login-url');
@@ -196,10 +200,11 @@ const rowGrokRegisterStatus = document.getElementById('row-grok-register-status'
 const displayGrokRegisterStatus = document.getElementById('display-grok-register-status');
 const rowGrokSsoStatus = document.getElementById('row-grok-sso-status');
 const displayGrokSsoStatus = document.getElementById('display-grok-sso-status');
+const rowGrokWebchat2ApiUploadStatus = document.getElementById('row-grok-webchat2api-upload-status');
+const displayGrokWebchat2ApiUploadStatus = document.getElementById('display-grok-webchat2api-upload-status');
 const rowGrokSsoSettings = document.getElementById('row-grok-sso-settings');
 const displayGrokSsoCookie = document.getElementById('display-grok-sso-cookie');
 const btnCopyGrokSso = document.getElementById('btn-copy-grok-sso');
-const btnExportGrokSso = document.getElementById('btn-export-grok-sso');
 const btnClearGrokSso = document.getElementById('btn-clear-grok-sso');
 const rowCustomPassword = document.getElementById('row-custom-password');
 const rowPlusMode = document.getElementById('row-plus-mode');
@@ -1576,6 +1581,7 @@ const PRIVACY_MASKED_INPUT_IDS = Object.freeze([
   'input-sub2api-default-proxy',
   'input-codex2api-url',
   'input-kiro-rs-url',
+  'input-grok-webchat2api-url',
   'input-gpc-helper-api',
   'input-gpc-helper-phone',
   'input-gpc-helper-local-sms-url',
@@ -2718,6 +2724,20 @@ function getGrokRegisterStatusLabel(value = '') {
   }
 }
 
+function getGrokWebchat2ApiUploadStatusLabel(value = '') {
+  const normalized = String(value || '').trim().toLowerCase();
+  switch (normalized) {
+    case 'uploading':
+      return '正在上传';
+    case 'uploaded':
+      return '已上传';
+    case 'error':
+      return '上传失败';
+    default:
+      return String(value || '').trim() || '未开始';
+  }
+}
+
 function renderGrokRuntimeState(state = latestState) {
   const runtimeState = getGrokRuntimeState(state);
   const registerStatus = String(
@@ -2737,6 +2757,27 @@ function renderGrokRuntimeState(state = latestState) {
     || state?.grokSsoExtractedAt
     || 0
   ) || 0;
+  const uploadState = runtimeState?.upload || {};
+  const uploadStatus = String(
+    uploadState.status
+    || state?.grokWebchat2ApiUploadStatus
+    || ''
+  ).trim();
+  const uploadedAt = Number(
+    uploadState.uploadedAt
+    || state?.grokWebchat2ApiUploadedAt
+    || 0
+  ) || 0;
+  const uploadMessage = String(
+    uploadState.message
+    || state?.grokWebchat2ApiUploadMessage
+    || ''
+  ).trim();
+  const uploadTargetUrl = String(
+    uploadState.targetUrl
+    || state?.grokWebchat2ApiTargetUrl
+    || ''
+  ).trim();
 
   if (displayGrokRegisterStatus) {
     displayGrokRegisterStatus.textContent = getGrokRegisterStatusLabel(registerStatus);
@@ -2750,9 +2791,15 @@ function renderGrokRuntimeState(state = latestState) {
     displayGrokSsoCookie.textContent = currentCookie
       ? `${currentCookie.slice(0, 8)}...${currentCookie.slice(-6)}`
       : '未提取';
-    displayGrokSsoCookie.title = currentCookie ? '已隐藏完整 SSO Cookie，可使用复制或导出' : '';
+    displayGrokSsoCookie.title = currentCookie ? '已隐藏完整 SSO Cookie，可使用复制' : '';
   }
-  [btnCopyGrokSso, btnExportGrokSso, btnClearGrokSso].forEach((button) => {
+  if (displayGrokWebchat2ApiUploadStatus) {
+    const label = getGrokWebchat2ApiUploadStatusLabel(uploadStatus);
+    const suffix = uploadedAt ? `，${new Date(uploadedAt).toLocaleString()}` : '';
+    displayGrokWebchat2ApiUploadStatus.textContent = `${label}${uploadMessage ? `：${uploadMessage}` : ''}${suffix}`;
+    displayGrokWebchat2ApiUploadStatus.title = uploadTargetUrl || '';
+  }
+  [btnCopyGrokSso, btnClearGrokSso].forEach((button) => {
     if (button) {
       button.disabled = cookies.length === 0;
     }
@@ -4915,6 +4962,12 @@ function collectSettingsPayload() {
   const currentKiroRsKeyValue = typeof inputKiroRsKey !== 'undefined' && inputKiroRsKey
     ? String(inputKiroRsKey.value ?? '').trim()
     : null;
+  const currentGrokWebchat2ApiUrlValue = typeof inputGrokWebchat2ApiUrl !== 'undefined' && inputGrokWebchat2ApiUrl
+    ? String(inputGrokWebchat2ApiUrl.value ?? '').trim()
+    : null;
+  const currentGrokWebchat2ApiKeyValue = typeof inputGrokWebchat2ApiKey !== 'undefined' && inputGrokWebchat2ApiKey
+    ? String(inputGrokWebchat2ApiKey.value ?? '').trim()
+    : null;
   const normalizeHostedCheckoutDelaySecondsSafe = typeof normalizePlusHostedCheckoutOauthDelaySeconds === 'function'
     ? normalizePlusHostedCheckoutOauthDelaySeconds
     : ((value) => {
@@ -4933,6 +4986,12 @@ function collectSettingsPayload() {
     kiroRsKey: currentKiroRsKeyValue !== null
       ? currentKiroRsKeyValue
       : String(latestState?.kiroRsKey || '').trim(),
+    grokWebchat2ApiUrl: currentGrokWebchat2ApiUrlValue !== null
+      ? currentGrokWebchat2ApiUrlValue
+      : String(latestState?.grokWebchat2ApiUrl || '').trim(),
+    grokWebchat2ApiAdminKey: currentGrokWebchat2ApiKeyValue !== null
+      ? currentGrokWebchat2ApiKeyValue
+      : String(latestState?.grokWebchat2ApiAdminKey || '').trim(),
     vpsUrl: inputVpsUrl.value.trim(),
     vpsPassword: inputVpsPassword.value,
     localCpaStep9Mode: getSelectedLocalCpaStep9Mode(),
@@ -11128,6 +11187,12 @@ function applySettingsState(state) {
   if (typeof inputKiroRsKey !== 'undefined' && inputKiroRsKey) {
     inputKiroRsKey.value = String(state?.kiroRsKey || '');
   }
+  if (typeof inputGrokWebchat2ApiUrl !== 'undefined' && inputGrokWebchat2ApiUrl) {
+    inputGrokWebchat2ApiUrl.value = String(state?.grokWebchat2ApiUrl || '').trim();
+  }
+  if (typeof inputGrokWebchat2ApiKey !== 'undefined' && inputGrokWebchat2ApiKey) {
+    inputGrokWebchat2ApiKey.value = String(state?.grokWebchat2ApiAdminKey || '');
+  }
   if (typeof displayKiroRsTestStatus !== 'undefined' && displayKiroRsTestStatus) {
     displayKiroRsTestStatus.textContent = kiroRsConnectionTestStatusText;
   }
@@ -14053,23 +14118,6 @@ btnCopyGrokSso?.addEventListener('click', async () => {
   }
 });
 
-btnExportGrokSso?.addEventListener('click', () => {
-  try {
-    const cookies = normalizeGrokSsoCookies(latestState);
-    if (!cookies.length) {
-      throw new Error('没有可导出的 Grok SSO Cookie。');
-    }
-    downloadTextFile(
-      `${cookies.join('\n')}\n`,
-      `grok-sso-cookies-${new Date().toISOString().replace(/[:.]/g, '-')}.txt`,
-      'text/plain;charset=utf-8'
-    );
-    showToast('Grok SSO Cookie 已导出。', 'success');
-  } catch (error) {
-    showToast(error?.message || '导出 Grok SSO Cookie 失败。', 'error');
-  }
-});
-
 btnClearGrokSso?.addEventListener('click', async () => {
   try {
     const cookies = normalizeGrokSsoCookies(latestState);
@@ -15769,6 +15817,16 @@ selectPlusAccountAccessStrategy?.addEventListener('change', () => {
   input?.addEventListener('input', () => {
     markSettingsDirty(true);
     setKiroRsConnectionTestStatus('未测试');
+    scheduleSettingsAutoSave();
+  });
+  input?.addEventListener('blur', () => {
+    saveSettings({ silent: true }).catch(() => { });
+  });
+});
+
+[inputGrokWebchat2ApiUrl, inputGrokWebchat2ApiKey].forEach((input) => {
+  input?.addEventListener('input', () => {
+    markSettingsDirty(true);
     scheduleSettingsAutoSave();
   });
   input?.addEventListener('blur', () => {
