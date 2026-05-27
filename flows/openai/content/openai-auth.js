@@ -210,6 +210,27 @@ const LOGIN_EXTERNAL_IDP_PATTERN = /google|microsoft|apple|sso|single\s+sign[-\s
 const LOGIN_CODE_ONLY_ACTION_PATTERN = /one[-\s]*time|passcode|use\s+(?:a\s+)?code|验证码|一次性|ワンタイム|パスコード|認証コード|確認コード/i;
 
 const RESEND_VERIFICATION_CODE_PATTERN = /重新发送(?:验证码)?|再次发送(?:验证码)?|重发(?:验证码)?|未收到(?:验证码|邮件)|(?:コード|メール|確認コード|認証コード)(?:を)?再送信|再送信|新しい(?:コード|確認コード|認証コード)|届かない|受信していません|resend(?:\s+code)?|send\s+(?:a\s+)?new\s+code|send\s+(?:it\s+)?again|request\s+(?:a\s+)?new\s+code|didn'?t\s+receive/i;
+const CHOOSE_ACCOUNT_PAGE_PATTERN = new RegExp([
+  String.raw`choose\s+(?:an?\s+)?account`,
+  String.raw`select\s+(?:an?\s+)?account`,
+  String.raw`welcome\s+back`,
+  String.raw`\u9009\u62e9(?:\u4e00\u4e2a)?(?:\u5e10\u6237|\u8d26\u6237|\u8d26\u53f7)`,
+  String.raw`\u6b22\u8fce\u56de\u6765`,
+  String.raw`\u30a2\u30ab\u30a6\u30f3\u30c8.*(?:\u9078\u629e|\u9078\u3093\u3067)`,
+].join('|'), 'i');
+const CHOOSE_ACCOUNT_REMOVE_ACTION_PATTERN = /remove|delete|forget|close|dismiss|trash|\u79fb\u9664|\u5220\u9664|\u522a\u9664|\u524a\u9664|\u9589\u3058\u308b|\u524a\u9664/i;
+const CHOOSE_ACCOUNT_OTHER_ACCOUNT_PATTERN = new RegExp([
+  String.raw`another\s+account`,
+  String.raw`different\s+account`,
+  String.raw`other\s+account`,
+  String.raw`use\s+(?:a\s+)?different`,
+  String.raw`sign\s*in\s+(?:with\s+)?(?:another|different)`,
+  String.raw`log\s*in\s+(?:with\s+)?(?:another|different)`,
+  String.raw`\u5176\u4ed6(?:\u5e10\u6237|\u8d26\u6237|\u8d26\u53f7)`,
+  String.raw`\u53e6\u4e00\u4e2a(?:\u5e10\u6237|\u8d26\u6237|\u8d26\u53f7)`,
+  String.raw`\u5225\u306e\u30a2\u30ab\u30a6\u30f3\u30c8`,
+].join('|'), 'i');
+const CHOOSE_ACCOUNT_ACTION_SELECTOR = 'button, a, [role="button"], [role="link"], [tabindex]:not([tabindex="-1"])';
 const PHONE_RESEND_SERVER_ERROR_PREFIX = 'PHONE_RESEND_SERVER_ERROR::';
 const CONTACT_VERIFICATION_SERVER_ERROR_PATTERN = /this\s+page\s+isn['’]?t\s+working|currently\s+unable\s+to\s+handle\s+this\s+request|http\s+error\s+500|500\s+internal\s+server\s+error/i;
 
@@ -3039,6 +3060,123 @@ function getPhoneVerificationDisplayedPhone() {
   return matches[0] ? String(matches[0]).replace(/\s+/g, ' ').trim() : '';
 }
 
+function normalizeAuthAccountIdentifier(value) {
+  return String(value || '').replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+function getChooseAccountCandidateText(element) {
+  const parts = [
+    element?.textContent,
+    element?.value,
+    element?.getAttribute?.('aria-label'),
+    element?.getAttribute?.('title'),
+    element?.getAttribute?.('data-testid'),
+    element?.getAttribute?.('data-test-id'),
+  ];
+  return parts
+    .filter(Boolean)
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function isChooseAccountPage() {
+  const path = `${location.pathname || ''} ${location.href || ''}`;
+  if (/\/choose-an-account(?:[/?#]|$)/i.test(path)) {
+    return true;
+  }
+  const pageText = getPageTextSnapshot();
+  if (!CHOOSE_ACCOUNT_PAGE_PATTERN.test(pageText)) {
+    return false;
+  }
+  return Boolean(findChooseAccountButtonForEmail(getLoginVerificationDisplayedEmail()));
+}
+
+function isChooseAccountRemovalAction(element) {
+  if (!element) return false;
+  const text = getChooseAccountCandidateText(element);
+  const role = String(element.getAttribute?.('role') || '').trim().toLowerCase();
+  return CHOOSE_ACCOUNT_REMOVE_ACTION_PATTERN.test(text)
+    || role === 'menuitem'
+    || role === 'switch';
+}
+
+function resolveChooseAccountClickTarget(element) {
+  if (!element || isChooseAccountRemovalAction(element)) {
+    return null;
+  }
+
+  const tag = String(element.tagName || '').trim().toLowerCase();
+  const role = String(element.getAttribute?.('role') || '').trim().toLowerCase();
+  const tabIndex = Number(element.getAttribute?.('tabindex') ?? element.tabIndex ?? NaN);
+  const actionable = tag === 'button'
+    || tag === 'a'
+    || role === 'button'
+    || role === 'link'
+    || (Number.isFinite(tabIndex) && tabIndex >= 0);
+
+  if (actionable && isActionEnabled(element) && isVisibleElement(element)) {
+    return element;
+  }
+
+  const closestAction = element.closest?.(CHOOSE_ACCOUNT_ACTION_SELECTOR) || null;
+  if (
+    closestAction
+    && closestAction !== element
+    && isActionEnabled(closestAction)
+    && isVisibleElement(closestAction)
+    && !isChooseAccountRemovalAction(closestAction)
+  ) {
+    return closestAction;
+  }
+
+  return null;
+}
+
+function findChooseAccountButtonForEmail(email) {
+  const normalizedEmail = normalizeAuthAccountIdentifier(email);
+  if (!normalizedEmail || !normalizedEmail.includes('@')) {
+    return null;
+  }
+
+  const candidates = Array.from(document.querySelectorAll(CHOOSE_ACCOUNT_ACTION_SELECTOR))
+    .filter((element) => isVisibleElement(element) && isActionEnabled(element));
+
+  for (const candidate of candidates) {
+    if (isChooseAccountRemovalAction(candidate)) continue;
+    const text = normalizeAuthAccountIdentifier(getChooseAccountCandidateText(candidate));
+    if (!text || !text.includes(normalizedEmail)) continue;
+    if (CHOOSE_ACCOUNT_OTHER_ACCOUNT_PATTERN.test(text)) continue;
+    const target = resolveChooseAccountClickTarget(candidate);
+    if (target) {
+      return target;
+    }
+  }
+
+  const emailNodes = Array.from(document.querySelectorAll('body *'))
+    .filter((element) => {
+      if (!isVisibleElement(element)) return false;
+      const text = normalizeAuthAccountIdentifier(getChooseAccountCandidateText(element));
+      return text.includes(normalizedEmail);
+    });
+
+  for (const node of emailNodes) {
+    let current = node;
+    while (current && current !== document.body) {
+      const target = resolveChooseAccountClickTarget(current);
+      if (target) {
+        const targetText = normalizeAuthAccountIdentifier(getChooseAccountCandidateText(target));
+        if (targetText.includes(normalizedEmail) && !CHOOSE_ACCOUNT_OTHER_ACCOUNT_PATTERN.test(targetText)) {
+          return target;
+        }
+      }
+      current = current.parentElement;
+    }
+  }
+
+  return null;
+}
+
 function getOAuthConsentForm() {
   return document.querySelector(OAUTH_CONSENT_FORM_SELECTOR);
 }
@@ -4194,6 +4332,7 @@ function inspectLoginAuthState() {
   const phoneVerificationPage = isPhoneVerificationPageReady();
   const consentReady = isStep8Ready();
   const oauthConsentPage = isOAuthConsentPage();
+  const chooseAccountPage = isChooseAccountPage();
   const baseState = {
     state: 'unknown',
     url: location.href,
@@ -4220,6 +4359,7 @@ function inspectLoginAuthState() {
     phoneVerificationPage,
     oauthConsentPage,
     consentReady,
+    chooseAccountPage,
   };
 
   if (retryState) {
@@ -4279,6 +4419,13 @@ function inspectLoginAuthState() {
     };
   }
 
+  if (chooseAccountPage) {
+    return {
+      ...baseState,
+      state: 'choose_account_page',
+    };
+  }
+
   if (verificationVisible) {
     return {
       ...baseState,
@@ -4330,6 +4477,7 @@ function serializeLoginAuthState(snapshot) {
     phoneVerificationPage: Boolean(snapshot?.phoneVerificationPage),
     oauthConsentPage: Boolean(snapshot?.oauthConsentPage),
     consentReady: Boolean(snapshot?.consentReady),
+    chooseAccountPage: Boolean(snapshot?.chooseAccountPage),
   };
 }
 
@@ -4350,6 +4498,8 @@ function getLoginAuthStateLabel(snapshot) {
       return '登录超时报错页';
     case 'oauth_consent_page':
       return 'OAuth 授权页';
+    case 'choose_account_page':
+      return 'OpenAI choose account page';
     case 'entry_page':
       return '登录入口页';
     case 'add_phone_page':
@@ -5617,6 +5767,158 @@ async function waitForLoginEntryOpenTransition(timeout = 10000) {
   return snapshot;
 }
 
+function isOpenAiOAuthAuthorizationRoute(rawUrl = '') {
+  const value = String(rawUrl || '').trim();
+  if (!value) {
+    return false;
+  }
+
+  try {
+    const parsed = new URL(value, location.href);
+    const hostname = String(parsed.hostname || '').toLowerCase();
+    if (!['auth.openai.com', 'auth0.openai.com', 'accounts.openai.com'].includes(hostname)) {
+      return false;
+    }
+
+    const pathname = parsed.pathname || '/';
+    return /^\/(?:authorize|oauth(?:2)?\/|api\/oauth\/oauth2\/auth|sign-in-with-chatgpt\/)/i.test(pathname);
+  } catch {
+    return false;
+  }
+}
+
+function isPostChooseAccountOAuthRoute(snapshot = {}) {
+  const url = String(snapshot?.url || location.href || '').trim();
+  if (!isOpenAiOAuthAuthorizationRoute(url)) {
+    return false;
+  }
+
+  try {
+    const parsed = new URL(url, location.href);
+    return !/\/choose-an-account(?:[/?#]|$)/i.test(parsed.pathname || '');
+  } catch {
+    return !/\/choose-an-account(?:[/?#]|$)/i.test(url);
+  }
+}
+
+async function waitForChooseAccountTransition(timeout = 15000) {
+  const start = Date.now();
+  let snapshot = normalizeStep6Snapshot(inspectLoginAuthState());
+
+  while (Date.now() - start < timeout) {
+    throwIfStopped();
+    snapshot = normalizeStep6Snapshot(inspectLoginAuthState());
+    if (isPostChooseAccountOAuthRoute(snapshot)) {
+      return {
+        ...snapshot,
+        oauthAuthorizationRoute: true,
+      };
+    }
+    if (snapshot.state !== 'unknown' && snapshot.state !== 'choose_account_page') {
+      return snapshot;
+    }
+    await sleep(250);
+  }
+
+  return snapshot;
+}
+
+async function step6ChooseExistingAccount(payload, snapshot) {
+  const performOperationWithDelay = typeof getOperationDelayRunner === 'function'
+    ? getOperationDelayRunner()
+    : async (metadata, operation) => {
+        const rootScope = typeof window !== 'undefined' ? window : globalThis;
+        const gate = rootScope?.CodexOperationDelay?.performOperationWithDelay;
+        return typeof gate === 'function' ? gate(metadata, operation) : operation();
+      };
+  const visibleStep = Math.floor(Number(payload?.visibleStep) || 0) || 7;
+  const currentSnapshot = normalizeStep6Snapshot(snapshot || inspectLoginAuthState());
+  const loginIdentifierType = String(payload?.loginIdentifierType || '').trim();
+  if (loginIdentifierType === 'phone') {
+    return createStep6RecoverableResult('choose_account_requires_email_identifier', currentSnapshot, {
+      message: 'OpenAI choose-account page requires an email account card; current login identifier is phone.',
+    });
+  }
+
+  const email = normalizeAuthAccountIdentifier(payload?.email || payload?.accountIdentifier || '');
+  if (!email || !email.includes('@')) {
+    return createStep6RecoverableResult('missing_choose_account_email', currentSnapshot, {
+      message: 'OpenAI choose-account page is visible, but the target email is missing.',
+    });
+  }
+
+  const target = findChooseAccountButtonForEmail(email);
+  if (!target) {
+    return createStep6RecoverableResult('choose_account_target_not_found', currentSnapshot, {
+      message: `OpenAI choose-account page does not contain target email ${email}.`,
+    });
+  }
+
+  log(`Detected OpenAI choose-account page, selecting ${email}...`, 'info', { step: visibleStep, stepKey: 'oauth-login' });
+  await humanPause(350, 900);
+  await performOperationWithDelay({ stepKey: 'oauth-login', kind: 'click', label: 'choose-existing-account' }, async () => {
+    simulateClick(target);
+  });
+
+  const nextSnapshot = normalizeStep6Snapshot(await waitForChooseAccountTransition(15000));
+  if (nextSnapshot.state === 'oauth_consent_page') {
+    return createStep6OAuthConsentSuccessResult(nextSnapshot, {
+      via: 'choose_account_oauth_consent_page',
+    });
+  }
+  if (nextSnapshot.oauthAuthorizationRoute || isPostChooseAccountOAuthRoute(nextSnapshot)) {
+    return createStep6OAuthConsentSuccessResult(nextSnapshot, {
+      via: 'choose_account_oauth_authorization_route',
+    });
+  }
+  if (nextSnapshot.state === 'add_email_page') {
+    return createStep6AddEmailSuccessResult(nextSnapshot, {
+      via: 'choose_account_add_email_page',
+    });
+  }
+  if (nextSnapshot.state === 'verification_page') {
+    return finalizeStep6VerificationReady({
+      visibleStep,
+      loginVerificationRequestedAt: null,
+      via: 'choose_account_verification_page',
+    });
+  }
+  if (nextSnapshot.state === 'phone_verification_page') {
+    return finalizeStep6VerificationReady({
+      visibleStep,
+      loginVerificationRequestedAt: null,
+      via: 'choose_account_phone_verification_page',
+      allowPhoneVerificationPage: true,
+    });
+  }
+  if (nextSnapshot.state === 'password_page') {
+    return step6LoginFromPasswordPage(payload, nextSnapshot);
+  }
+  if (nextSnapshot.state === 'email_page') {
+    return step6LoginFromEmailPage(payload, nextSnapshot);
+  }
+  if (nextSnapshot.state === 'phone_entry_page') {
+    return step6LoginFromPhonePage(payload, nextSnapshot);
+  }
+  if (nextSnapshot.state === 'login_timeout_error_page') {
+    const transition = await createStep6LoginTimeoutRecoveryTransition(
+      'login_timeout_after_choose_account',
+      nextSnapshot,
+      'Clicking the existing OpenAI account entered the login timeout page.',
+      { visibleStep }
+    );
+    if (transition.action === 'done') return transition.result;
+    if (transition.action === 'phone') return step6LoginFromPhonePage(payload, transition.snapshot);
+    if (transition.action === 'email') return step6LoginFromEmailPage(payload, transition.snapshot);
+    if (transition.action === 'password') return step6LoginFromPasswordPage(payload, transition.snapshot);
+    return transition.result;
+  }
+
+  return createStep6RecoverableResult('choose_account_transition_stalled', nextSnapshot, {
+    message: `Clicked ${email} on OpenAI choose-account page, but the page did not enter a supported next state.`,
+  });
+}
+
 async function waitForPhoneLoginEntrySwitchTransition(timeout = 10000) {
   const start = Date.now();
   let snapshot = normalizeStep6Snapshot(inspectLoginAuthState());
@@ -6189,6 +6491,10 @@ async function step6_login(payload) {
   if (snapshot.state === 'password_page') {
     log('认证页已在密码页，继续当前登录流程。', 'info', { step: visibleStep, stepKey: 'oauth-login' });
     return step6LoginFromPasswordPage(payload, snapshot);
+  }
+
+  if (snapshot.state === 'choose_account_page') {
+    return step6ChooseExistingAccount(payload, snapshot);
   }
 
   if (snapshot.state === 'entry_page') {

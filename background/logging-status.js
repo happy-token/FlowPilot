@@ -121,6 +121,8 @@
           return '登录超时报错页';
         case 'oauth_consent_page':
           return 'OAuth 授权页';
+        case 'choose_account_page':
+          return 'OpenAI choose account page';
         case 'add_phone_page':
           return '手机号页';
         case 'add_email_page':
