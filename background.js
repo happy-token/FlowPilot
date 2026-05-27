@@ -45,6 +45,7 @@ importScripts(
   'flows/kiro/background/desktop-authorize-runner.js',
   'flows/kiro/background/publisher-kiro-rs.js',
   'flows/grok/background/publisher-webchat2api.js',
+  'background/email-local-part-helpers.js',
   'background/generated-email-helpers.js',
   'background/signup-flow-helpers.js',
   'background/mail-rule-registry.js',

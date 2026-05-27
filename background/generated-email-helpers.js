@@ -1,6 +1,6 @@
 (function attachGeneratedEmailHelpers(root, factory) {
-  root.MultiPageGeneratedEmailHelpers = factory();
-})(typeof self !== 'undefined' ? self : globalThis, function createGeneratedEmailHelpersModule() {
+  root.MultiPageGeneratedEmailHelpers = factory(root);
+})(typeof self !== 'undefined' ? self : globalThis, function createGeneratedEmailHelpersModule(root = globalThis) {
   function createGeneratedEmailHelpers(deps = {}) {
     const {
       addLog,
@@ -24,6 +24,7 @@
       normalizeEmailGenerator,
       isGeneratedAliasProvider,
       persistRegistrationEmailState = null,
+      buildRandomNameDateTimeLocalPart = root.MultiPageEmailLocalPartHelpers?.buildRandomNameDateTimeLocalPart,
       reuseOrCreateTab,
       sendToContentScript,
       setEmailState,
@@ -57,6 +58,12 @@
       }
 
       return chars.join('');
+    }
+
+    function buildDefaultGeneratedEmailLocalPart(date = new Date()) {
+      return typeof buildRandomNameDateTimeLocalPart === 'function'
+        ? buildRandomNameDateTimeLocalPart(date)
+        : '';
     }
 
     async function fetchCloudflareEmail(state, options = {}) {
@@ -165,7 +172,9 @@
         requireAdminAuth: true,
         requireDomain: true,
       });
-      const requestedName = String(options.localPart || options.name || '').trim().toLowerCase() || generateCloudflareAliasLocalPart();
+      const requestedName = String(options.localPart || options.name || '').trim().toLowerCase()
+        || buildDefaultGeneratedEmailLocalPart(options.date)
+        || generateCloudflareAliasLocalPart();
       const effectiveDomain = config.effectiveDomain || (
         typeof buildCloudflareTempEmailEffectiveDomain === 'function'
           ? buildCloudflareTempEmailEffectiveDomain(config)
@@ -377,6 +386,8 @@
       fetchCloudflareTempEmailAddress,
       fetchDuckEmail,
       fetchGeneratedEmail,
+      buildDefaultGeneratedEmailLocalPart,
+      buildRandomNameDateTimeLocalPart,
       generateCloudflareAliasLocalPart,
       requestCloudflareTempEmailJson,
     };
