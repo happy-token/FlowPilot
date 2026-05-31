@@ -10614,6 +10614,7 @@ function updatePhoneVerificationSettingsUI() {
   }
   updateSignupMethodUI();
   if (btnTogglePhoneVerificationSection) {
+    btnTogglePhoneVerificationSection.style.display = enabled ? '' : 'none';
     btnTogglePhoneVerificationSection.disabled = !enabled;
     btnTogglePhoneVerificationSection.textContent = showSettings ? '收起设置' : '展开设置';
     btnTogglePhoneVerificationSection.title = enabled

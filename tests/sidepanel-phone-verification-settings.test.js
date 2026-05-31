@@ -673,6 +673,19 @@ return {
   assert.equal(api.shouldWarnCpaPhoneSignup('phone', 'cpa'), true);
 });
 
+test('settings expand buttons are hidden while their switches are off', () => {
+  assert.match(
+    sidepanelSource,
+    /btnTogglePhoneVerificationSection\.style\.display\s*=\s*enabled\s*\?\s*''\s*:\s*'none';/
+  );
+
+  const ipProxyPanelSource = fs.readFileSync('sidepanel/ip-proxy-panel.js', 'utf8');
+  assert.match(
+    ipProxyPanelSource,
+    /btnToggleIpProxySection\.style\.display\s*=\s*enabled\s*\?\s*''\s*:\s*'none';/
+  );
+});
+
 test('phone signup relogin-after-bind-email switch is wired into UI and step definitions', () => {
   assert.match(sidepanelHtml, /row-phone-signup-relogin-after-bind-email/);
   assert.match(sidepanelHtml, /input-phone-signup-relogin-after-bind-email/);
@@ -889,6 +902,7 @@ let selectedSignupMethod = SIGNUP_METHOD_EMAIL;
 let capabilityOverride = null;
 const btnTogglePhoneVerificationSection = {
   disabled: false,
+  style: { display: '' },
   textContent: '',
   title: '',
   setAttribute: () => {},
@@ -1193,6 +1207,7 @@ return {
   assert.equal(api.rowPhoneSmsProvider.style.display, 'none');
   assert.equal(api.rowPhoneSmsProviderOrder.style.display, 'none');
   assert.equal(api.rowPhoneSmsProviderOrderActions.style.display, 'none');
+  assert.equal(api.btnTogglePhoneVerificationSection.style.display, 'none');
   assert.equal(api.btnTogglePhoneVerificationSection.disabled, true);
   assert.equal(api.btnTogglePhoneVerificationSection.textContent, '展开设置');
   assert.equal(api.rowHeroSmsPlatform.style.display, '');
@@ -1250,6 +1265,7 @@ return {
   assert.equal(api.rowHeroSmsCurrentCountdown.style.display, '');
   assert.equal(api.rowHeroSmsCurrentCode.style.display, '');
   assert.equal(api.rowHeroSmsPreferredActivation.style.display, '');
+  assert.equal(api.btnTogglePhoneVerificationSection.style.display, '');
 
   api.setExpanded(true);
   api.updatePhoneVerificationSettingsUI();
@@ -1258,6 +1274,7 @@ return {
   assert.equal(api.rowPhoneSmsProvider.style.display, '');
   assert.equal(api.rowPhoneSmsProviderOrder.style.display, '');
   assert.equal(api.rowPhoneSmsProviderOrderActions.style.display, '');
+  assert.equal(api.btnTogglePhoneVerificationSection.style.display, '');
   assert.equal(api.btnTogglePhoneVerificationSection.disabled, false);
   assert.equal(api.btnTogglePhoneVerificationSection.textContent, '收起设置');
   assert.equal(api.rowHeroSmsPlatform.style.display, '');
