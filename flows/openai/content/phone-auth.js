@@ -22,6 +22,7 @@
     const PHONE_RESEND_THROTTLED_ERROR_PREFIX = 'PHONE_RESEND_THROTTLED::';
     const PHONE_RESEND_BANNED_NUMBER_ERROR_PREFIX = 'PHONE_RESEND_BANNED_NUMBER::';
     const PHONE_RESEND_SERVER_ERROR_PREFIX = 'PHONE_RESEND_SERVER_ERROR::';
+    const PHONE_VERIFICATION_SERVER_ERROR_PREFIX = 'PHONE_VERIFICATION_SERVER_ERROR::';
     const PHONE_MAX_USAGE_EXCEEDED_PATTERN = /phone_max_usage_exceeded/i;
     const PHONE_ROUTE_405_RECOVERY_FAILED_ERROR_PREFIX = 'PHONE_ROUTE_405_RECOVERY_FAILED::';
     const PHONE_ROUTE_405_RECOVERY_COOLDOWN_MS = 6000;
@@ -618,9 +619,9 @@
       return '';
     }
 
-    function getPhoneResendServerErrorText() {
+    function getPhoneVerificationServerErrorText() {
       const path = String(location?.pathname || '');
-      if (!/\/contact-verification(?:[/?#]|$)/i.test(path)) {
+      if (!/\/phone-verification(?:[/?#]|$)/i.test(path)) {
         return '';
       }
       const text = String(getPageTextSnapshot?.() || '').replace(/\s+/g, ' ').trim();
@@ -629,7 +630,22 @@
       if (!PHONE_RESEND_SERVER_ERROR_PATTERN.test(combined)) {
         return '';
       }
-      return combined || 'OpenAI contact-verification page returned HTTP ERROR 500 after resend.';
+      return combined || 'OpenAI phone-verification page returned HTTP ERROR 500.';
+    }
+
+    function getPhoneResendServerErrorText() {
+      const path = String(location?.pathname || '');
+      if (!/\/contact-verification(?:[/?#]|$)/i.test(path) && !/\/phone-verification(?:[/?#]|$)/i.test(path)) {
+        return '';
+      }
+      const text = String(getPageTextSnapshot?.() || '').replace(/\s+/g, ' ').trim();
+      const title = String(document?.title || '').replace(/\s+/g, ' ').trim();
+      const combined = `${title} ${text}`.trim();
+      if (!PHONE_RESEND_SERVER_ERROR_PATTERN.test(combined)) {
+        return '';
+      }
+      const prefix = /\/contact-verification(?:[/?#]|$)/i.test(path) ? 'contact-verification' : 'phone-verification';
+      return combined || `OpenAI ${prefix} page returned HTTP ERROR 500 after resend.`;
     }
 
     function checkPhoneResendError() {
@@ -781,6 +797,14 @@
           await recoverPhoneRoute405(Math.min(12000, Math.max(1000, timeout - (Date.now() - start))));
           continue;
         }
+        const serverErrorText = getPhoneVerificationServerErrorText();
+        if (serverErrorText) {
+          return {
+            phoneVerificationServerError: true,
+            errorText: serverErrorText,
+            url: location.href,
+          };
+        }
         if (isPhoneVerificationPageReady()) {
           return {
             phoneVerificationPage: true,
@@ -799,6 +823,14 @@
           }
         }
         await sleep(150);
+      }
+      const timeoutServerErrorText = getPhoneVerificationServerErrorText();
+      if (timeoutServerErrorText) {
+        return {
+          phoneVerificationServerError: true,
+          errorText: timeoutServerErrorText,
+          url: location.href,
+        };
       }
       if (isAddPhonePageReady()) {
         const errorText = getAddPhoneErrorText();
@@ -878,6 +910,15 @@
           continue;
         }
 
+        const serverErrorText = getPhoneVerificationServerErrorText();
+        if (serverErrorText) {
+          return {
+            phoneVerificationServerError: true,
+            errorText: serverErrorText,
+            url: location.href,
+          };
+        }
+
         const errorText = getVerificationErrorText();
         if (errorText) {
           return {
@@ -903,6 +944,15 @@
         }
 
         await sleep(150);
+      }
+
+      const timeoutServerErrorText = getPhoneVerificationServerErrorText();
+      if (timeoutServerErrorText) {
+        return {
+          phoneVerificationServerError: true,
+          errorText: timeoutServerErrorText,
+          url: location.href,
+        };
       }
 
       if (isPhoneVerificationPageReady()) {
@@ -1112,6 +1162,8 @@
       getSmsChannelRadio,
       getWhatsAppChannelRadio,
       ensureSmsChannelSelected,
+      getPhoneVerificationServerErrorText,
+      PHONE_VERIFICATION_SERVER_ERROR_PREFIX,
     };
   }
 

@@ -78,6 +78,7 @@
     const PHONE_RESEND_THROTTLED_ERROR_PREFIX = 'PHONE_RESEND_THROTTLED::';
     const PHONE_RESEND_BANNED_NUMBER_ERROR_PREFIX = 'PHONE_RESEND_BANNED_NUMBER::';
     const PHONE_RESEND_SERVER_ERROR_PREFIX = 'PHONE_RESEND_SERVER_ERROR::';
+    const PHONE_VERIFICATION_SERVER_ERROR_PREFIX = 'PHONE_VERIFICATION_SERVER_ERROR::';
     const PHONE_ROUTE_405_RECOVERY_FAILED_ERROR_PREFIX = 'PHONE_ROUTE_405_RECOVERY_FAILED::';
     const PHONE_MANUAL_FREE_REUSE_ERROR_PREFIX = 'PHONE_MANUAL_FREE_REUSE::';
     const PHONE_AUTO_FREE_REUSE_PREPARE_ERROR_PREFIX = 'PHONE_AUTO_FREE_REUSE_PREPARE::';
@@ -3385,6 +3386,13 @@
               signupProfile: options.signupProfile || null,
             });
 
+            if (submitResult.phoneVerificationServerError) {
+              const serverErrorText = String(submitResult.errorText || submitResult.url || 'unknown error');
+              throw new Error(
+                `步骤 4：提交注册手机验证码后 /phone-verification 返回 HTTP 500（${serverErrorText}），请更换手机号重新开始注册。`
+              );
+            }
+
             if (submitResult.invalidCode) {
               const invalidErrorText = String(submitResult.errorText || submitResult.url || '未知错误').trim();
               if (attempt >= DEFAULT_PHONE_SUBMIT_ATTEMPTS) {
@@ -4153,6 +4161,41 @@
               }
               throw submitError;
             }
+            if (submitResult.phoneVerificationServerError) {
+              const serverErrorText = String(submitResult.errorText || submitResult.url || 'unknown error');
+              usedNumberReplacementAttempts += 1;
+              if (usedNumberReplacementAttempts > maxNumberReplacementAttempts) {
+                throw buildPhoneReplacementLimitError(maxNumberReplacementAttempts, 'resend_server_error');
+              }
+              await addLog(
+                `步骤 9：提交 ${activation.phoneNumber} 后 /phone-verification 返回 HTTP 500（${serverErrorText}），更换号码重试（${usedNumberReplacementAttempts}/${maxNumberReplacementAttempts}）。`,
+                'warn'
+              );
+              await discardPhoneActivationFromReuse(
+                '提交手机号后 /phone-verification 返回 500。',
+                activation,
+                await getState()
+              );
+              const rotated = shouldCancelActivation && activation
+                ? await rotateCurrentActivation('resend_server_error', 'cancel')
+                : { handled: false, nextActivation: null };
+              if (!rotated.nextActivation) {
+                if (!rotated.handled && shouldCancelActivation && activation) {
+                  await cancelPhoneActivation(state, activation);
+                }
+                await clearCurrentActivation();
+                activation = null;
+                shouldCancelActivation = false;
+              }
+              preferReuseExistingActivationOnAddPhone = false;
+              addPhoneReentryWithSameActivation = 0;
+              pageState = {
+                ...pageState,
+                addPhonePage: true,
+                phoneVerificationPage: false,
+              };
+              continue;
+            }
             if (submitResult.addPhoneRejected) {
               const addPhoneRejectText = String(submitResult.errorText || submitResult.url || 'unknown error');
               if (isPhoneNumberUsedError(addPhoneRejectText)) {
@@ -4305,6 +4348,21 @@
                 addPhonePage: true,
                 phoneVerificationPage: false,
               };
+              break;
+            }
+
+            if (submitResult.phoneVerificationServerError) {
+              const serverErrorText = String(submitResult.errorText || submitResult.url || 'unknown error');
+              shouldReplaceNumber = true;
+              replaceReason = 'resend_server_error';
+              if (shouldCancelActivation && activation) {
+                await cancelPhoneActivation(state, activation);
+                shouldCancelActivation = false;
+              }
+              await addLog(
+                `步骤 9：提交验证码后 /phone-verification 返回 HTTP 500（${serverErrorText}），更换号码重试。`,
+                'warn'
+              );
               break;
             }
 
