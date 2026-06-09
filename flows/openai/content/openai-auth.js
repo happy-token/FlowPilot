@@ -349,7 +349,7 @@ function isEmailVerificationPage() {
 
 function getContactVerificationServerErrorText() {
   const path = String(location?.pathname || '');
-  if (!/\/contact-verification(?:[/?#]|$)/i.test(path)) {
+  if (!/\/contact-verification(?:[/?#]|$)/i.test(path) && !/\/phone-verification(?:[/?#]|$)/i.test(path)) {
     return '';
   }
   const text = String(getPageTextSnapshot?.() || document?.body?.textContent || '').replace(/\s+/g, ' ').trim();
@@ -358,7 +358,7 @@ function getContactVerificationServerErrorText() {
   if (!CONTACT_VERIFICATION_SERVER_ERROR_PATTERN.test(combined)) {
     return '';
   }
-  return combined || 'OpenAI contact-verification page returned HTTP ERROR 500 after resend.';
+  return combined || `OpenAI ${/\/phone-verification/i.test(path) ? 'phone-verification' : 'contact-verification'} page returned HTTP ERROR 500 after resend.`;
 }
 
 function buildContactVerificationServerError(errorText = '') {
@@ -366,7 +366,7 @@ function buildContactVerificationServerError(errorText = '') {
     ? PHONE_RESEND_SERVER_ERROR_PREFIX
     : 'PHONE_RESEND_SERVER_ERROR::';
   const resolvedText = String(errorText || '').trim()
-    || 'OpenAI contact-verification 页面返回 HTTP ERROR 500。';
+    || 'OpenAI contact-verification / phone-verification 页面返回 HTTP ERROR 500。';
   return new Error(
     resolvedText.startsWith(serverErrorPrefix)
       ? resolvedText
@@ -3429,6 +3429,9 @@ function isPhoneVerificationPageReady() {
   const isPhoneVerificationRoute = /\/phone-verification(?:[/?#]|$)/i.test(path);
   const isContactVerificationRoute = /\/contact-verification(?:[/?#]|$)/i.test(path);
   if (isContactVerificationRoute && getContactVerificationServerErrorText()) {
+    return false;
+  }
+  if (isPhoneVerificationRoute && getContactVerificationServerErrorText()) {
     return false;
   }
   if (isPhoneVerificationRoute || isContactVerificationRoute) {
